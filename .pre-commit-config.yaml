@@ -1,0 +1,27 @@
+# The tools come from the dev environment (pip install -e ".[dev]");
+# mypy and vulture take their paths from pyproject.toml.
+repos:
+  - repo: local
+    hooks:
+      - id: ruff
+        name: ruff check
+        entry: ruff check
+        language: system
+        types: [python]
+      - id: ruff-format
+        name: ruff format
+        entry: ruff format
+        language: system
+        types: [python]
+      - id: mypy
+        name: mypy
+        entry: mypy
+        language: system
+        types: [python]
+        pass_filenames: false
+      - id: vulture
+        name: vulture
+        entry: vulture
+        language: system
+        types: [python]
+        pass_filenames: false
