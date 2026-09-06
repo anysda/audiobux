@@ -7,6 +7,8 @@ import ast
 from pathlib import Path
 
 PACKAGE = Path(__file__).parent.parent / "audiobux"
+# what the formats may not reach
+OUTSIDE_FORMATS = {"models", "llm", "f5", "takes", "speech", "chunk", "cleanup", "figures", "pipeline", "worker"}
 
 
 def modules() -> dict[str, Path]:
@@ -59,10 +61,22 @@ def reach(edges: dict[str, set[str]], start: str) -> set[str]:
     return seen
 
 
+def is_format(name: str) -> bool:
+    return name.split(".")[0] == "formats"
+
+
 def test_no_cycles() -> None:
     edges = graph()
     looped = sorted(m for m in edges if m in reach(edges, m))
     assert not looped, f"modules in an import cycle: {looped}"
+
+
+def test_formats_know_nothing_of_models_and_steps() -> None:
+    edges = graph()
+    readers = [m for m in edges if is_format(m)]
+    assert len(readers) > 3
+    for name in readers:
+        assert not reach(edges, name) & OUTSIDE_FORMATS, name
 
 
 def test_the_check_sees_heavy_imports_and_package_paths(tmp_path) -> None:

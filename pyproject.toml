@@ -4,11 +4,20 @@ version = "0.1.0"
 description = "Book file in, m4b audiobook out"
 requires-python = ">=3.12"
 dependencies = [
+    "ebooklib>=0.18",
+    "lxml>=5",
+    "numpy>=1.26",
+    "pymupdf>=1.24",
+    "rapidfuzz>=3",
+    "soundfile>=0.12",
 ]
 
 [project.optional-dependencies]
 test = ["pytest>=8", "pytest-cov>=5"]
 dev = ["audiobux[test]", "ruff>=0.15", "mypy>=1.15", "vulture>=2.14", "pre-commit>=4"]
+
+[project.scripts]
+audiobux = "audiobux.__main__:main"
 
 [build-system]
 requires = ["setuptools>=69"]
