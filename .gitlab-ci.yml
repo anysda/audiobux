@@ -38,7 +38,7 @@ imports:
 pytest:
   stage: test
   script:
-    - apt-get update && apt-get install -y --no-install-recommends ffmpeg
+    - apt-get update && apt-get install -y --no-install-recommends ffmpeg djvulibre-bin
     - pip install ".[test]"
     - pytest
   coverage: '/^TOTAL.*\s(\d+%)$/'

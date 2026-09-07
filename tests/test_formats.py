@@ -49,6 +49,17 @@ def test_pdf_scan_goes_to_ocr(chekhov_scan, tmp_path):
     assert all((tmp_path / p).exists() for p in book.pages)
 
 
+def test_djvu_with_text_layer(chekhov_djvu, tmp_path):
+    book = formats.read(chekhov_djvu, tmp_path, 2)
+    check_stories(book.chapters)
+
+
+def test_djvu_without_text_layer(chekhov_djvu_scan, tmp_path):
+    book = formats.read(chekhov_djvu_scan, tmp_path, 2)
+    assert [t for _, t, _ in top_levels(book.outline, 2)] == TITLES
+    assert len(book.pages) > 3 and all((tmp_path / p).exists() for p in book.pages)
+
+
 def test_garbage_text_layer_is_not_text():
     page = ["ÐÑÐ»Ð¸ Ð¿ÑÐ¾Ð¸Ð·Ð²ÐµÐ´ÐµÐ½Ð¸Ðµ ÑÐ²Ð»ÑÐµÑÑÑ Ð¿ÐµÑÐµÐ²Ð¾Ð´Ð¾Ð¼ Ð¸Ð»Ð¸ Ð¸Ð½ÑÐ¼"]
     assert not has_text_layer([page] * 10)
@@ -79,6 +90,14 @@ def samples(chekhov_pdf, chekhov_djvu, chekhov_epub, chekhov_scan, chekhov_djvu_
     return {"pdf": [chekhov_pdf, chekhov_scan], "djvu": [chekhov_djvu, chekhov_djvu_scan], "epub": [chekhov_epub]}
 
 
+def test_every_format_is_told_by_its_signature(samples):
+    assert sorted(samples) == sorted(k.name for k in formats.KINDS)
+    for name, paths in samples.items():
+        for path in paths:
+            found = formats.detect(path)
+            assert found is not None and found.name == name, path
+
+
 def test_extension_does_not_make_a_format(tmp_path, samples):
     text = tmp_path / "Книга.pdf"
     text.write_text("Это просто текст, а не PDF.\n" * 10)
@@ -88,6 +107,17 @@ def test_extension_does_not_make_a_format(tmp_path, samples):
     renamed = tmp_path / "book.epub"
     renamed.write_bytes(samples["pdf"][0].read_bytes())
     assert formats.read(renamed, tmp_path, 2).chapters
+
+
+def test_pdf_header_after_some_junk(tmp_path, chekhov_pdf):
+    junk = tmp_path / "junk.pdf"
+    junk.write_bytes(b"\x00junk before the header\r\n" * 20 + chekhov_pdf.read_bytes())
+    found = formats.detect(junk)
+    assert found is not None and found.name == "pdf"
+    check_stories(formats.read(junk, tmp_path, 2).chapters)
+    late = tmp_path / "late.pdf"
+    late.write_bytes(b"x" * 1024 + chekhov_pdf.read_bytes())
+    assert formats.detect(late) is None, "the header is looked for in the first kilobyte only"
 
 
 def test_epub_with_mimetype_anywhere_and_packed(tmp_path, chekhov_epub):
@@ -101,6 +131,21 @@ def test_epub_with_mimetype_anywhere_and_packed(tmp_path, chekhov_epub):
     found = formats.detect(shuffled)
     assert found is not None and found.name == "epub"
     check_stories(formats.read(shuffled, tmp_path, 2).chapters)
+
+
+def test_zip_that_is_not_an_epub(tmp_path):
+    plain = tmp_path / "book.epub"
+    with zipfile.ZipFile(plain, "w") as z:
+        z.writestr("mimetype", "application/zip")
+        z.writestr("text.txt", "Просто архив.")
+    assert formats.detect(plain) is None
+    broken = tmp_path / "broken.epub"
+    broken.write_bytes(b"PK\x03\x04" + bytes(100))
+    assert formats.detect(broken) is None
+
+
+def test_extensions_come_from_the_list():
+    assert formats.extensions() == (".pdf", ".djvu", ".epub")
 
 
 # A format added by a module and a line in the list, nothing else
