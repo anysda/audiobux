@@ -3,20 +3,22 @@ in the book's directory, so a restarted run picks up where it stopped."""
 
 import logging
 import os
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 import soundfile as sf
 
-from . import chunk, cover, formats, m4b, reading
+from . import chunk, cover, figures, formats, m4b, reading
 from .book import Book
 from .config import Settings
+from .formats.pages import from_pages, top_levels
 from .models import Models
 
 log = logging.getLogger(__name__)
 
-
+FIGURE_LINE = re.compile(r"^\[Рисунок:\s*(.*?)\]$", re.S)
 # pieces voiced or heard per round
 ROUND = 32
 
@@ -49,8 +51,83 @@ def extract_text(book: Book, ctx: Context) -> None:
         )
 
 
-def split(book: Book, ctx: Context) -> None:
+def ocr(book: Book, ctx: Context) -> None:
+    if not book.path("scan.json").exists():
+        return
+    if ctx.models.ocr is None:
+        raise NotImplementedError("the book is a scan and no OCR model is set")
+    scan = book.read("scan.json")
+    pages, found = [], []
+    for n, name in enumerate(scan["pages"]):
+        text = ctx.models.ocr.page_text(book.path(name))
+        page = blocks(text)
+        pages.append([described(b) for b in page])
+        # the picture behind each description, for the EPUB
+        found += figures.cut_scan(
+            book.path(name), n, [described(b) for b in page if FIGURE_LINE.match(b.strip())], book.dir
+        )
+    toc = top_levels([tuple(t) for t in scan["outline"]], ctx.settings.toc_depth) or headings(pages)
+    outline = scan.get("outline") or headings(pages)
+    pages = [[b.lstrip("#").strip() for b in blocks] for blocks in pages]
+    chapters = from_pages(pages, toc)
+    if found:
+        book.write("figures.json", found)
+    book.write(
+        "text.json", {"title": scan["title"], "author": scan["author"], "chapters": chapters, "outline": outline}
+    )
+
+
+def blocks(text: str) -> list[str]:
+    """Paragraphs of an OCR reply; a `#` heading is a paragraph of its own."""
+    out, lines = [], []
+    for line in text.splitlines():
+        if line.strip() and not line.startswith("#"):
+            lines.append(line)
+            continue
+        if lines:
+            out.append("\n".join(lines))
+            lines = []
+        if line.strip():
+            out.append(line.strip())
+    if lines:
+        out.append("\n".join(lines))
+    return out
+
+
+def described(block: str) -> str:
+    """`[Рисунок: На рисунке ...]` of the OCR reply: the description is read as it is."""
+    m = FIGURE_LINE.match(block.strip())
+    return m.group(1).strip() if m else block
+
+
+def headings(pages: list[list[str]]) -> list[tuple[int, str, int]]:
+    """A table of contents from the headings the OCR model marked with `#`."""
+    return [
+        (1, b.lstrip("#").strip(), n)
+        for n, blocks in enumerate(pages)
+        for b in blocks
+        if b.startswith("#") and b.lstrip("#").strip()
+    ]
+
+
+def describe(book: Book, ctx: Context) -> None:
+    """Figure marks of the text become descriptions told by the vision model."""
     data = book.read("text.json")
+    found = data.pop("figures", [])
+    told = []
+    if found and ctx.models.figures:
+        figures.near(data["chapters"], found)
+        try:
+            told = ctx.models.figures.describe(found, book.dir)
+        finally:
+            ctx.models.release_llm()
+        book.write("figures.json", [f | {"said": t} for f, t in zip(found, told, strict=True)])
+    data["chapters"] = figures.put(data["chapters"], told)
+    book.write("described.json", data)
+
+
+def split(book: Book, ctx: Context) -> None:
+    data = book.read("described.json")
     tts = ctx.models.tts
     pieces = chunk.chunks(data["chapters"], tts.seconds, tts.room)
     if not pieces:
@@ -66,7 +143,7 @@ def tts(book: Book, ctx: Context) -> None:
 
 
 def assemble(book: Book, ctx: Context) -> None:
-    data = book.read("text.json")
+    data = book.read("described.json")
     pieces = book.read("chunks.json")
     meta = {"title": data["title"], "artist": data["author"], "album": data["title"], "genre": "Audiobook"}
     picture = book.path("cover.jpg")
@@ -117,7 +194,14 @@ def _synth_all(
             return
 
 
-STEPS = [Step("extract", extract_text), Step("chunk", split), Step("tts", tts), Step("assemble", assemble)]
+STEPS = [
+    Step("extract", extract_text),
+    Step("ocr", ocr),
+    Step("figures", describe),
+    Step("chunk", split),
+    Step("tts", tts),
+    Step("assemble", assemble),
+]
 
 
 def run(book: Book, ctx: Context, until: str | None = None) -> Path | None:

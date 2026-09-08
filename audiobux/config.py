@@ -10,6 +10,9 @@ class Settings:
     data: Path = Path("data")
     toc_depth: int = 2
     tts: str = "tone"
+    llm: str = "unsloth/Qwen3.6-35B-A3B-GGUF:Qwen3.6-35B-A3B-UD-Q4_K_M.gguf"
+    ocr: str = "unsloth/Qwen3.6-35B-A3B-GGUF:Qwen3.6-35B-A3B-UD-Q4_K_M.gguf"
+    ocr_vision: str = "mmproj-F16.gguf"
 
     @property
     def work(self) -> Path:
@@ -25,4 +28,11 @@ class Settings:
             return env.get("AUDIOBUX_" + name.upper(), str(default))
 
         d = cls()
-        return cls(data=Path(get("data", d.data)), toc_depth=int(get("toc_depth", d.toc_depth)), tts=get("tts", d.tts))
+        return cls(
+            data=Path(get("data", d.data)),
+            toc_depth=int(get("toc_depth", d.toc_depth)),
+            tts=get("tts", d.tts),
+            llm=get("llm", d.llm),
+            ocr=get("ocr", d.ocr),
+            ocr_vision=get("ocr_vision", d.ocr_vision),
+        )

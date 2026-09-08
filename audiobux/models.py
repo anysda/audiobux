@@ -1,16 +1,23 @@
 """Model slots of the pipeline.
 
 Each slot is a small interface: a model only has to implement the same method.
-TTS is a tone for now, as long as the text would take to read.
+OCR is a vision language model reading the page image; TTS is a tone for now.
 """
 
 from collections.abc import Generator
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol
 
 import numpy as np
 
 from .config import Settings
+from .figures import Figures
+from .llm import Llm
+
+
+class Ocr(Protocol):
+    def page_text(self, image: Path) -> str: ...
 
 
 class Tts(Protocol):
@@ -24,6 +31,47 @@ class Tts(Protocol):
     def synth_many(self, texts: list[str], seed: int = 0) -> Generator[tuple[np.ndarray, int], None, None]:
         """Mono float32 samples and their sample rate for every text, yielded in order;
         another seed gives other takes, and a model may voice several texts at once."""
+
+
+OCR_PROMPT = """Ты переписываешь страницу русской книги с картинки в текст.
+Перепиши весь текст страницы дословно, ничего не исправляй, не пересказывай и не добавляй.
+Абзацы разделяй пустой строкой, строки внутри абзаца склей, переносы слов убери.
+Заголовок главы или раздела пиши отдельной строкой, начиная её с "# ".
+Колонтитулы, номера страниц и подписи к картинкам пропусти.
+Если на странице есть рисунок, схема, диаграмма или таблица, которые важны для смысла,
+на их месте напиши отдельной строкой "[Рисунок: ...]" с описанием по-русски в одно-три
+предложения для чтения вслух: что изображено и что это показывает, например
+"[Рисунок: На рисунке схема: заказ проходит три этапа ...]". Таблицу перескажи так же,
+начиная с "В таблице". Листинг кода не переписывай, а перескажи одной фразой, что он
+делает: "[Рисунок: В листинге ...]". Иконки, логотипы, линейки и украшения не описывай.
+Если на странице нет текста, ответь пустой строкой."""
+
+# the long side of the page the model sees; more costs tokens and reads no better
+OCR_SIDE = 1800
+
+
+class VlmOcr:
+    """A page image read by a vision language model behind llama.cpp."""
+
+    def __init__(self, llm: Llm) -> None:
+        self.llm = llm
+
+    def page_text(self, image: Path) -> str:
+        reply = self.llm.ask(OCR_PROMPT, "Текст страницы:", image=_page_png(image))
+        return reply.strip().removeprefix("```").removesuffix("```").strip()
+
+    def close(self) -> None:
+        self.llm.close()
+
+
+def _page_png(image: Path) -> bytes:
+    import pymupdf
+
+    pix = pymupdf.Pixmap(str(image))
+    while max(pix.width, pix.height) > OCR_SIDE:
+        pix.shrink(1)
+    png: bytes = pix.tobytes("png")
+    return png
 
 
 class ToneTts:
@@ -58,7 +106,15 @@ class ToneTts:
 
 @dataclass
 class Models:
+    ocr: Ocr | None
     tts: Tts
+    llm: Llm | None = None
+    figures: "Figures | None" = None
+
+    def release_llm(self) -> None:
+        """Frees the card for the speech model."""
+        for llm in {id(x): x for x in (self.llm, getattr(self.ocr, "llm", None)) if x}.values():
+            llm.close()
 
 
 def load(settings: Settings) -> Models:
@@ -67,4 +123,24 @@ def load(settings: Settings) -> Models:
         tts = ToneTts(silent=settings.tts == "silence")
     else:
         raise ValueError(f"unknown TTS engine: {settings.tts}")
-    return Models(tts=tts)
+    # one llama-server for every step when the text and the vision model are the same
+    vision = (
+        Llm(
+            settings.ocr,
+            settings.models,
+            parallel=8,
+            context=8192,
+            vision=settings.ocr_vision,
+            placement=("--fit", "on"),
+        )
+        if settings.ocr
+        else None
+    )
+    llm: Llm | None
+    if settings.llm and vision and settings.llm == settings.ocr:
+        llm = vision
+    else:
+        llm = Llm(settings.llm, settings.models) if settings.llm else None
+    return Models(
+        ocr=VlmOcr(vision) if vision else None, tts=tts, llm=llm, figures=Figures(vision, llm) if vision else None
+    )

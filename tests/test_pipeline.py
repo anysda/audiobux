@@ -7,6 +7,7 @@ import soundfile as sf
 from conftest import cover_jpeg
 
 from audiobux import m4b
+from audiobux.pipeline import blocks, headings
 
 
 def probe(path: Path) -> dict:
@@ -45,3 +46,10 @@ def test_m4b_has_chapters_cover_and_metadata(tmp_path):
     assert info["format"]["tags"]["title"] == "Книга" and info["format"]["tags"]["artist"] == "Автор"
     assert any(s.get("disposition", {}).get("attached_pic") for s in info["streams"])
     assert abs(float(info["format"]["duration"]) - 13.5) < 0.2
+
+
+def test_scan_without_toc_gets_chapters_from_ocr_headings():
+    first = blocks("# Глава 1\nПервый абзац,\nвторая строка.\n\nВторой абзац.")
+    second = blocks("Конец первой главы.\n# Глава 2\n\nНачало второй.")
+    assert first == ["# Глава 1", "Первый абзац,\nвторая строка.", "Второй абзац."]
+    assert headings([first, second]) == [(1, "Глава 1", 0), (1, "Глава 2", 1)]
