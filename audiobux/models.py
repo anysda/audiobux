@@ -11,6 +11,7 @@ from typing import Protocol
 
 import numpy as np
 
+from .cleanup import Editor
 from .config import Settings
 from .figures import Figures
 from .llm import Llm
@@ -107,6 +108,7 @@ class ToneTts:
 @dataclass
 class Models:
     ocr: Ocr | None
+    editor: Editor
     tts: Tts
     llm: Llm | None = None
     figures: "Figures | None" = None
@@ -142,5 +144,9 @@ def load(settings: Settings) -> Models:
     else:
         llm = Llm(settings.llm, settings.models) if settings.llm else None
     return Models(
-        ocr=VlmOcr(vision) if vision else None, tts=tts, llm=llm, figures=Figures(vision, llm) if vision else None
+        ocr=VlmOcr(vision) if vision else None,
+        editor=Editor(llm, settings.fix_max_change),
+        tts=tts,
+        llm=llm,
+        figures=Figures(vision, llm) if vision else None,
     )

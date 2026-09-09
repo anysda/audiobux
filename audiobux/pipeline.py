@@ -126,8 +126,21 @@ def describe(book: Book, ctx: Context) -> None:
     book.write("described.json", data)
 
 
-def split(book: Book, ctx: Context) -> None:
+def fix(book: Book, ctx: Context) -> None:
     data = book.read("described.json")
+    try:
+        fixed = ctx.models.editor.fix(
+            [c["paragraphs"] for c in data["chapters"]], everything=book.path("scan.json").exists()
+        )
+    finally:
+        ctx.models.release_llm()
+    for chapter, done in zip(data["chapters"], fixed, strict=True):
+        chapter |= done
+    book.write("fixed.json", data)
+
+
+def split(book: Book, ctx: Context) -> None:
+    data = book.read("fixed.json")
     tts = ctx.models.tts
     pieces = chunk.chunks(data["chapters"], tts.seconds, tts.room)
     if not pieces:
@@ -143,7 +156,7 @@ def tts(book: Book, ctx: Context) -> None:
 
 
 def assemble(book: Book, ctx: Context) -> None:
-    data = book.read("described.json")
+    data = book.read("fixed.json")
     pieces = book.read("chunks.json")
     meta = {"title": data["title"], "artist": data["author"], "album": data["title"], "genre": "Audiobook"}
     picture = book.path("cover.jpg")
@@ -198,6 +211,7 @@ STEPS = [
     Step("extract", extract_text),
     Step("ocr", ocr),
     Step("figures", describe),
+    Step("fix", fix),
     Step("chunk", split),
     Step("tts", tts),
     Step("assemble", assemble),

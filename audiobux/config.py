@@ -13,6 +13,7 @@ class Settings:
     llm: str = "unsloth/Qwen3.6-35B-A3B-GGUF:Qwen3.6-35B-A3B-UD-Q4_K_M.gguf"
     ocr: str = "unsloth/Qwen3.6-35B-A3B-GGUF:Qwen3.6-35B-A3B-UD-Q4_K_M.gguf"
     ocr_vision: str = "mmproj-F16.gguf"
+    fix_max_change: float = 0.1
 
     @property
     def work(self) -> Path:
@@ -35,4 +36,5 @@ class Settings:
             llm=get("llm", d.llm),
             ocr=get("ocr", d.ocr),
             ocr_vision=get("ocr_vision", d.ocr_vision),
+            fix_max_change=float(get("fix_max_change", d.fix_max_change)),
         )
