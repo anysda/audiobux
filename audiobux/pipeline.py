@@ -41,7 +41,7 @@ def extract_text(book: Book, ctx: Context) -> None:
         if image:
             book.path(name).write_bytes(image)
     title = doc.title or Path(book.name).stem
-    cover.ensure(book.dir)
+    cover.ensure(book.dir, doc.author, title, book.name)
     data = {"title": title, "author": doc.author, "outline": doc.outline}
     if doc.pages:
         book.write("scan.json", data | {"pages": doc.pages})

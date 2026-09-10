@@ -1,9 +1,35 @@
 import pymupdf
 from conftest import cover_jpeg
 
-from audiobux import figures, models
+from audiobux import cover, figures, models
 from audiobux.formats import pdf
 from audiobux.text import MARK, mark
+
+
+def test_cover_from_the_book_stays(tmp_path, monkeypatch):
+    (tmp_path / "cover.jpg").write_bytes(b"own")
+    (tmp_path / "page1.jpg").write_bytes(b"page")
+    monkeypatch.setattr(cover, "fetch", lambda a, t: (_ for _ in ()).throw(AssertionError("asked")))
+    cover.ensure(tmp_path, "", "", "Книга.pdf")
+    assert (tmp_path / "cover.jpg").read_bytes() == b"own"
+
+
+def test_no_cover_in_the_book_asks_outside_then_takes_the_first_page(tmp_path, monkeypatch):
+    asked = []
+    monkeypatch.setattr(cover, "fetch", lambda a, t: asked.append((a, t)) or b"found")
+    cover.ensure(tmp_path, "", "", "Хононов - Изучаем DDD.pdf")
+    assert asked == [("Хононов", "Изучаем DDD")]
+    assert (tmp_path / "cover.jpg").read_bytes() == b"found"
+
+    (tmp_path / "cover.jpg").unlink()
+    (tmp_path / "page1.jpg").write_bytes(b"page")
+    monkeypatch.setattr(cover, "fetch", lambda a, t: None)
+    cover.ensure(tmp_path, "Автор", "Название", "x.pdf")
+    assert (tmp_path / "cover.jpg").read_bytes() == b"page"
+
+
+def test_fetch_is_a_stub_for_now():
+    assert cover.fetch("Хононов", "Изучаем DDD") is None
 
 
 def test_first_page_of_text_is_not_a_cover(tmp_path):
