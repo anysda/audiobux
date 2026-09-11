@@ -14,6 +14,8 @@ class Settings:
     ocr: str = "unsloth/Qwen3.6-35B-A3B-GGUF:Qwen3.6-35B-A3B-UD-Q4_K_M.gguf"
     ocr_vision: str = "mmproj-F16.gguf"
     fix_max_change: float = 0.1
+    accent: str = "turbo3.1"
+    stress: str = "plus"
 
     @property
     def work(self) -> Path:
@@ -37,4 +39,6 @@ class Settings:
             ocr=get("ocr", d.ocr),
             ocr_vision=get("ocr_vision", d.ocr_vision),
             fix_max_change=float(get("fix_max_change", d.fix_max_change)),
+            accent=get("accent", d.accent),
+            stress=get("stress", d.stress),
         )

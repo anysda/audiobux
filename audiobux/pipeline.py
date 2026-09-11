@@ -139,8 +139,24 @@ def fix(book: Book, ctx: Context) -> None:
     book.write("fixed.json", data)
 
 
-def split(book: Book, ctx: Context) -> None:
+def normalize(book: Book, ctx: Context) -> None:
+    """The text as it is said. A paragraph keeps its index, so a piece knows its place
+    in the reading text: one with nothing to say (a listing not told) stays empty."""
     data = book.read("fixed.json")
+    said = [[p for p in c["paragraphs"] if p] for c in data["chapters"]]
+    try:
+        ready = ctx.models.speech.prepare(said, book.path("latin.txt"))
+        ready = ctx.models.speech.mark(ready)
+    finally:
+        ctx.models.release_llm()
+    for chapter, paragraphs in zip(data["chapters"], ready, strict=True):
+        told = iter(paragraphs)
+        chapter["paragraphs"] = [next(told) if p else "" for p in chapter["paragraphs"]]
+    book.write("normalized.json", data)
+
+
+def split(book: Book, ctx: Context) -> None:
+    data = book.read("normalized.json")
     tts = ctx.models.tts
     pieces = chunk.chunks(data["chapters"], tts.seconds, tts.room)
     if not pieces:
@@ -156,7 +172,7 @@ def tts(book: Book, ctx: Context) -> None:
 
 
 def assemble(book: Book, ctx: Context) -> None:
-    data = book.read("fixed.json")
+    data = book.read("normalized.json")
     pieces = book.read("chunks.json")
     meta = {"title": data["title"], "artist": data["author"], "album": data["title"], "genre": "Audiobook"}
     picture = book.path("cover.jpg")
@@ -212,6 +228,7 @@ STEPS = [
     Step("ocr", ocr),
     Step("figures", describe),
     Step("fix", fix),
+    Step("normalize", normalize),
     Step("chunk", split),
     Step("tts", tts),
     Step("assemble", assemble),

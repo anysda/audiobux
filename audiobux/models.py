@@ -15,6 +15,7 @@ from .cleanup import Editor
 from .config import Settings
 from .figures import Figures
 from .llm import Llm
+from .speech import Speech
 
 
 class Ocr(Protocol):
@@ -109,6 +110,7 @@ class ToneTts:
 class Models:
     ocr: Ocr | None
     editor: Editor
+    speech: Speech
     tts: Tts
     llm: Llm | None = None
     figures: "Figures | None" = None
@@ -146,6 +148,7 @@ def load(settings: Settings) -> Models:
     return Models(
         ocr=VlmOcr(vision) if vision else None,
         editor=Editor(llm, settings.fix_max_change),
+        speech=Speech(llm, settings.accent, settings.stress == "plus", settings.models),
         tts=tts,
         llm=llm,
         figures=Figures(vision, llm) if vision else None,

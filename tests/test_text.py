@@ -1,6 +1,7 @@
 import json
 
-from audiobux import cleanup
+from audiobux import cleanup, speech
+from audiobux.speech import Speech
 
 
 class FakeLlm:
@@ -22,6 +23,11 @@ class FakeLlm:
 
     def close(self):
         self.running = False
+
+
+class Stresses:
+    def process_all(self, text, skip_regex=None):
+        return text.replace("замок", "з+амок").replace("(", " (").replace("«", "")
 
 
 def test_rules_mend_layout_leftovers():
@@ -104,3 +110,70 @@ def test_code_listing_is_told_not_read():
         {"paragraphs": [before, "", after], "listings": kept}
     ]
     assert cleanup.by_rules([[before, *code, after]]) == [{"paragraphs": [before, "", after], "listings": kept}]
+
+
+def test_numbers_by_model_checked_against_rules(tmp_path):
+    ok = "В 2003 году вышла книга."
+    wrong = "Глава 5 о моделях."
+    garbled = "К 2020 году."
+    llm = FakeLlm(
+        {
+            ok: "В две тысячи третьем году вышла книга.",
+            wrong: "Пятая глава о моделях и ещё много добавленных моделью слов.",
+            garbled: "К двум тысячому двадцатьому году.",
+        }
+    )
+    s = Speech(llm, accent="")
+    out = s.prepare(
+        [[ok, wrong, garbled, "Версия 3.11, т. е. новая.", "Схема на рис. 2, данные в табл. 3."]],
+        tmp_path / "latin.txt",
+    )
+    assert out == [
+        [
+            "В две тысячи третьем году вышла книга.",
+            "Глава пять о моделях.",
+            "К две тысячи двадцатом году.",
+            "Версия три точка одиннадцать, то есть новая.",
+            "Схема на рисунке два, данные в таблице три.",
+        ]
+    ]
+
+
+def test_latin_dictionary_is_written_once_and_editable(tmp_path):
+    path = tmp_path / "latin.txt"
+    llm = FakeLlm(latin={"DDD": "ди-ди-д+и", "Java": "дж+ава", "Kafka": "к+афка"})
+    s = Speech(llm, accent="")
+    assert s.prepare([["Пишем DDD на Java."]], path) == [["Пишем ди-ди-д+и на дж+ава."]]
+    assert speech.read_dictionary(path) == {"DDD": "ди-ди-д+и", "Java": "дж+ава"}
+
+    path.write_text(path.read_text().replace("дж+ава", "дж+ава-маш+ина"))
+    llm.asked.clear()
+    assert s.prepare([["Пишем DDD на Java и Kafka."]], path) == [["Пишем ди-ди-д+и на дж+ава-маш+ина и к+афка."]]
+    assert llm.asked == ["Kafka"], "only new words go to the model"
+
+
+def test_stress_marks_and_brackets_read_as_commas(tmp_path):
+    text = "Это замок (старый), «большой»."
+    s = Speech(accent="turbo3.1")
+    s._accentizer = Stresses()
+    assert s.prepare([[text]], tmp_path / "latin.txt") == [["Это з+амок, старый, большой."]]
+    s.stress = False
+    assert s.prepare([[text]], tmp_path / "latin.txt") == [["Это замок, старый, большой."]]
+
+
+def test_stress_mark_kept_where_accentizer_puts_back_yo():
+    assert (
+        speech._stressed("Нужно четкое, твердое «да».", "Н+ужно ч+ёткое, тв+ёрдое д+а.")
+        == "Н+ужно ч+ёткое, тв+ёрдое «д+а»."
+    )
+
+
+def test_reader_pauses_marked_only_when_words_stay():
+    text = "Когда он пришёл дом+ой, было уже поздно и все спали."
+    llm = FakeLlm({text.replace("+", ""): "Когда он пришёл домой, | было уже поздно и все спали. |"})
+    assert Speech(llm, accent="")._marked(text) == "Когда он пришёл дом+ой, | было уже поздно и все спали."
+    llm = FakeLlm({text.replace("+", ""): "Когда он вернулся домой, | было уже поздно и все спали."})
+    assert Speech(llm, accent="")._marked(text) == text
+    short = "Глава первая."
+    llm = FakeLlm()
+    assert Speech(llm, accent="")._marked(short) == short and not llm.asked

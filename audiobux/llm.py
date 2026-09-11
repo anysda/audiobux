@@ -5,6 +5,7 @@ free again for the speech model.
 """
 
 import base64
+import json
 import logging
 import shutil
 import socket
@@ -132,6 +133,18 @@ def hub_file(spec: str, model: str) -> tuple[str, str]:
     if not name:
         repo, name = model.partition(":")[0], spec
     return repo, name
+
+
+def parse_json(reply: str) -> dict[str, Any]:
+    """The first JSON object in a reply; models sometimes wrap it in a code fence."""
+    start, end = reply.find("{"), reply.rfind("}")
+    if start < 0 or end < start:
+        return {}
+    try:
+        found: dict[str, Any] = json.loads(reply[start : end + 1])
+    except json.JSONDecodeError:
+        return {}
+    return found
 
 
 def _free_port() -> int:
