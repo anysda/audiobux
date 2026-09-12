@@ -1,7 +1,8 @@
 """Model slots of the pipeline.
 
 Each slot is a small interface: a model only has to implement the same method.
-OCR is a vision language model reading the page image; TTS is a tone for now.
+OCR is a vision language model reading the page image; TTS is F5-TTS_RUSSIAN,
+or a tone for tests.
 """
 
 from collections.abc import Generator
@@ -123,7 +124,11 @@ class Models:
 
 def load(settings: Settings) -> Models:
     tts: Tts
-    if settings.tts in ("tone", "silence"):
+    if settings.tts == "f5":
+        from .f5 import F5Tts
+
+        tts = F5Tts(settings.voice, settings.voice_text, settings.models)
+    elif settings.tts in ("tone", "silence"):
         tts = ToneTts(silent=settings.tts == "silence")
     else:
         raise ValueError(f"unknown TTS engine: {settings.tts}")
