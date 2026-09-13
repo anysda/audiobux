@@ -6,15 +6,20 @@ import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
+from typing import Any
 
+import numpy as np
 import soundfile as sf
+from rapidfuzz.distance import Levenshtein
 
-from . import chunk, cover, figures, formats, m4b, reading
+from . import chunk, cover, figures, formats, m4b, reading, speech, takes
 from .book import Book
 from .config import Settings
 from .formats.pages import from_pages, top_levels
 from .models import Models
+from .takes import Heard
 
 log = logging.getLogger(__name__)
 
@@ -171,6 +176,103 @@ def tts(book: Book, ctx: Context) -> None:
         _synth_all(book, ctx, todo, [pieces[i]["text"] for i in todo])
 
 
+def verify(book: Book, ctx: Context) -> None:
+    """Every piece is heard and its words found letter by letter. A take with a stutter,
+    a word broken by a silence or too many wrong words is voiced again with another
+    seed, up to `verify_attempts` takes; the best one gets its pauses set by the text
+    and goes into ready/. A piece still wrong after that is logged and written into
+    verify.json, and the book goes on."""
+    if not ctx.models.listener and not ctx.models.aligner:
+        return
+    latin = speech.read_dictionary(book.path("latin.txt"))
+    pieces = book.read("chunks.json")
+    book.path("ready").mkdir(exist_ok=True)
+    for at in range(0, len(pieces), ROUND):
+        pending = [i for i in range(at, min(at + ROUND, len(pieces))) if not _ready(book, i).exists()]
+        best: dict[int, dict[str, Any]] = {}
+        for seed in range(ctx.settings.verify_attempts):
+            if seed:
+                todo = [i for i in pending if not _take(book, i, seed).exists()]
+                _synth_all(
+                    book, ctx, todo, [pieces[i]["text"] for i in todo], seed, path=partial(_take, book, seed=seed)
+                )
+            heard = (
+                ctx.models.listener.listen_many([_take(book, i, seed) for i in pending])
+                if ctx.models.listener
+                else [None] * len(pending)
+            )
+            for i, h in zip(pending, heard, strict=True):
+                take = _examine(book, ctx, pieces[i], _take(book, i, seed), h, latin) | {"seed": seed}
+                if i not in best or take["score"] < best[i]["score"]:
+                    best[i] = take
+                if take["bad"]:
+                    log.warning("%s: piece %d take %d: %s", book.name, i, seed + 1, "; ".join(take["why"]))
+            pending = [i for i in pending if best[i]["bad"]]
+            if not pending:
+                break
+        for i, take in sorted(best.items()):
+            wave = take.pop("wave")
+            tmp = book.path(f"ready/{i:05}.tmp.wav")
+            sf.write(tmp, wave, take.pop("rate"), subtype="PCM_16")
+            book.write(f"ready/{i:05}.json", take)
+            os.replace(tmp, _ready(book, i))
+            if take["bad"]:
+                log.warning("%s: piece %d left as it is after %d takes", book.name, i, ctx.settings.verify_attempts)
+    report = []
+    for i in range(len(pieces)):
+        take = book.read(f"ready/{i:05}.json") if book.path(f"ready/{i:05}.json").exists() else {}
+        if take.get("bad"):
+            report.append({"piece": i, "text": pieces[i]["text"]} | take)
+    book.write("verify.json", report)
+
+
+def _examine(
+    book: Book, ctx: Context, piece: dict[str, Any], wav: Path, heard: Heard | None, latin: dict[str, str]
+) -> dict[str, Any]:
+    """A take checked and with its pauses set: score 0 when nothing is wrong."""
+    wave, rate = sf.read(wav, dtype="float32")
+    text_words, bounds = takes.piece_words(piece["text"], piece.get("bounds", []))
+    why: list[str] = []
+    error, stutter = 0.0, 0
+    broken: list[tuple[str, float, float]] = []
+    info: dict[str, int] = {}
+    times: list[list[float] | None] = []
+    if heard is not None:
+        error = cer(piece["text"], heard.text, latin)
+        if error > ctx.settings.verify_cer:
+            why.append(f"CER {error:.2f}: {heard.text[:80]!r}")
+        loud = takes.loudness(wave, rate)
+        stutter, found = takes.stutters(text_words, heard.words, loud >= np.percentile(loud, 95) - 35)
+        why += found
+    if ctx.models.aligner and text_words:
+        wave, info = takes.retime(wave, rate, ctx.models.aligner.align(wave, rate, text_words), bounds)
+        aligned = ctx.models.aligner.align(wave, rate, text_words)
+        broken = takes.broken(wave, rate, aligned)
+        # where each word is in the take as it goes into the book, for the reading text
+        times = [[round(w.start, 3), round(w.end, 3)] if w.sure > 0 else None for w in aligned]
+        why += [f"разрыв «{w}» {d * 1000:.0f} мс на {t} с" for w, t, d in broken]
+    bad = bool(stutter or broken or error > ctx.settings.verify_cer)
+    score = 10 * (stutter + len(broken)) + (error > ctx.settings.verify_cer) + error
+    return {
+        "wave": wave,
+        "rate": rate,
+        "bad": bad,
+        "score": round(score, 3),
+        "cer": round(error, 3),
+        "stutter": stutter,
+        "broken": broken,
+        "why": why,
+        "heard": heard.text if heard is not None else "",
+        "words": times,
+    } | info
+
+
+def cer(text: str, heard: str, latin: dict[str, str] | None = None) -> float:
+    """Character error rate of what was heard against the text, words only."""
+    expected = speech.plain(text, latin)
+    return Levenshtein.distance(expected, speech.plain(heard, latin)) / max(len(expected), 1)
+
+
 def assemble(book: Book, ctx: Context) -> None:
     data = book.read("normalized.json")
     pieces = book.read("chunks.json")
@@ -190,6 +292,10 @@ def assemble(book: Book, ctx: Context) -> None:
 
 def _wav(book: Book, i: int) -> Path:
     return book.path(f"tts/{i:05}.wav")
+
+
+def _take(book: Book, i: int, seed: int) -> Path:
+    return _wav(book, i) if seed == 0 else book.path(f"tts/{i:05}.s{seed}.wav")
 
 
 def _ready(book: Book, i: int) -> Path:
@@ -231,6 +337,7 @@ STEPS = [
     Step("normalize", normalize),
     Step("chunk", split),
     Step("tts", tts),
+    Step("verify", verify),
     Step("assemble", assemble),
 ]
 

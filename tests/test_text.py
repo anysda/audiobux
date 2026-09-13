@@ -1,6 +1,6 @@
 import json
 
-from audiobux import cleanup, speech
+from audiobux import cleanup, pipeline, speech
 from audiobux.speech import Speech
 
 
@@ -166,6 +166,12 @@ def test_stress_mark_kept_where_accentizer_puts_back_yo():
         speech._stressed("Нужно четкое, твердое «да».", "Н+ужно ч+ёткое, тв+ёрдое д+а.")
         == "Н+ужно ч+ёткое, тв+ёрдое «д+а»."
     )
+
+
+def test_cer_ignores_stress_case_digits_and_latin():
+    latin = {"DDD": "ди-ди-д+и"}
+    assert pipeline.cer("Вс+ё о ди-ди-д+и, три гл+авы.", "Все о DDD 3 главы", latin) == 0
+    assert pipeline.cer("один два три", "один два") > 0.15
 
 
 def test_reader_pauses_marked_only_when_words_stay():

@@ -18,6 +18,9 @@ class Settings:
     fix_max_change: float = 0.1
     accent: str = "turbo3.1"
     stress: str = "plus"
+    asr: str = "large-v3-turbo"
+    verify_cer: float = 0.15
+    verify_attempts: int = 3
 
     @property
     def work(self) -> Path:
@@ -26,6 +29,10 @@ class Settings:
     @property
     def models(self) -> Path:
         return self.data / "models"
+
+    @property
+    def db(self) -> Path:
+        return self.data / "audiobux.db"
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] = os.environ) -> "Settings":
@@ -45,4 +52,7 @@ class Settings:
             fix_max_change=float(get("fix_max_change", d.fix_max_change)),
             accent=get("accent", d.accent),
             stress=get("stress", d.stress),
+            asr=get("asr", d.asr),
+            verify_cer=float(get("verify_cer", d.verify_cer)),
+            verify_attempts=int(get("verify_attempts", d.verify_attempts)),
         )

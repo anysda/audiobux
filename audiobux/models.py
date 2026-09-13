@@ -5,10 +5,12 @@ OCR is a vision language model reading the page image; TTS is F5-TTS_RUSSIAN,
 or a tone for tests.
 """
 
+import subprocess
 from collections.abc import Generator
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 import numpy as np
 
@@ -17,6 +19,7 @@ from .config import Settings
 from .figures import Figures
 from .llm import Llm
 from .speech import Speech
+from .takes import Aligner, Heard, words
 
 
 class Ocr(Protocol):
@@ -34,6 +37,11 @@ class Tts(Protocol):
     def synth_many(self, texts: list[str], seed: int = 0) -> Generator[tuple[np.ndarray, int], None, None]:
         """Mono float32 samples and their sample rate for every text, yielded in order;
         another seed gives other takes, and a model may voice several texts at once."""
+
+
+class Listener(Protocol):
+    def listen_many(self, wavs: list[Path]) -> list[Heard]:
+        """What is said in every recording, with the time of every word, in order."""
 
 
 OCR_PROMPT = """Ты переписываешь страницу русской книги с картинки в текст.
@@ -107,14 +115,62 @@ class ToneTts:
         return wave.astype(np.float32), self.rate
 
 
+class Whisper:
+    """faster-whisper; the model is downloaded into the models volume on first use.
+    listen_many() hears several recordings at once, one CTranslate2 worker each."""
+
+    def __init__(self, model: str, models: Path, workers: int = 4, revision: str | None = None) -> None:
+        self.model, self.models, self.workers, self.revision = model, Path(models), workers, revision
+        self._model: Any = None
+
+    def listen(self, wav: Path) -> Heard:
+        self._load()
+        segments, _ = self._model.transcribe(
+            _samples16k(wav), language="ru", beam_size=5, vad_filter=False, word_timestamps=True
+        )
+        segments = list(segments)
+        heard = [(w, x.start, x.end) for s in segments for x in (s.words or []) for w in words(x.word)]
+        return Heard(" ".join(s.text.strip() for s in segments), heard)
+
+    def _load(self) -> None:
+        if self._model is None:
+            from faster_whisper import WhisperModel
+
+            self._model = WhisperModel(
+                self.model,
+                revision=self.revision,
+                device="auto",
+                compute_type="default",
+                download_root=str(self.models / "whisper"),
+                num_workers=self.workers,
+            )
+
+    def listen_many(self, wavs: list[Path]) -> list[Heard]:
+        self._load()
+        with ThreadPoolExecutor(self.workers) as pool:
+            return list(pool.map(self.listen, wavs))
+
+
+def _samples16k(wav: Path) -> np.ndarray:
+    """Audio as whisper wants it; decoded by ffmpeg, faster-whisper's own PyAV call breaks on new PyAV."""
+    raw = subprocess.run(
+        ["ffmpeg", "-v", "error", "-i", str(wav), "-ac", "1", "-ar", "16000", "-f", "f32le", "-"],
+        check=True,
+        capture_output=True,
+    ).stdout
+    return np.frombuffer(raw, np.float32)
+
+
 @dataclass
 class Models:
     ocr: Ocr | None
     editor: Editor
     speech: Speech
     tts: Tts
+    listener: Listener | None
     llm: Llm | None = None
     figures: "Figures | None" = None
+    aligner: Aligner | None = None
 
     def release_llm(self) -> None:
         """Frees the card for the speech model."""
@@ -128,8 +184,9 @@ def load(settings: Settings) -> Models:
         from .f5 import F5Tts
 
         tts = F5Tts(settings.voice, settings.voice_text, settings.models)
+        aligner = Aligner(settings.models)
     elif settings.tts in ("tone", "silence"):
-        tts = ToneTts(silent=settings.tts == "silence")
+        tts, aligner = ToneTts(silent=settings.tts == "silence"), None
     else:
         raise ValueError(f"unknown TTS engine: {settings.tts}")
     # one llama-server for every step when the text and the vision model are the same
@@ -155,6 +212,8 @@ def load(settings: Settings) -> Models:
         editor=Editor(llm, settings.fix_max_change),
         speech=Speech(llm, settings.accent, settings.stress == "plus", settings.models),
         tts=tts,
+        listener=Whisper(settings.asr, settings.models) if settings.asr else None,
         llm=llm,
         figures=Figures(vision, llm) if vision else None,
+        aligner=aligner,
     )

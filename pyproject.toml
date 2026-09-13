@@ -5,7 +5,9 @@ description = "Book file in, m4b audiobook out"
 requires-python = ">=3.12"
 dependencies = [
     "ebooklib>=0.18",
+    "faster-whisper>=1.2",
     "huggingface_hub>=0.30",
+    "librosa>=0.10",
     "lxml>=5",
     "numpy>=1.26",
     "pillow>=10",
