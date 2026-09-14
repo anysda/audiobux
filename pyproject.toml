@@ -77,6 +77,8 @@ ignore_missing_imports = true
 [tool.vulture]
 # the package only: a name the tests alone use is dead in the product
 paths = ["audiobux"]
+# an attribute set for a library that reads it: ebooklib (an item's is_linear goes into the spine)
+ignore_names = ["is_linear"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

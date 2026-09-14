@@ -18,7 +18,7 @@ def main() -> None:
     one = sub.add_parser("book", help="voice a single local file, without the queue")
     one.add_argument("file", type=Path)
     one.add_argument("--until")
-    one.add_argument("--out", type=Path, help="copy the m4b here")
+    one.add_argument("--out", type=Path, help="copy the m4b, the epub and <name>/ with the sync.json here")
     args = parser.parse_args()
     settings = Settings.from_env()
 
@@ -40,9 +40,20 @@ def voice_one(settings: Settings, file: Path, until: str | None, out: Path | Non
     book = Book.create(settings.work, file.name, lambda p: shutil.copyfile(file, p))
     result = pipeline.run(book, context(settings), until)
     print(book.dir)
+    if out and book.path("book.epub").exists():
+        out.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(book.path("book.epub"), out / (file.stem + ".epub"))
     if result and out:
         out.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(result, out / (file.stem + ".m4b"))
+    if out and book.path("sync.json").exists():
+        # a folder of its own: the sync's figures/ are named by page, and the next
+        # book's would land on them
+        (out / file.stem / "figures").mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(book.path("sync.json"), out / file.stem / "sync.json")
+        for chapter in book.read("sync.json")["chapters"]:
+            for src in (b["src"] for b in chapter["blocks"] if b.get("src")):
+                shutil.copyfile(book.path(src), out / file.stem / src)
 
 
 if __name__ == "__main__":

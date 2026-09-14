@@ -14,7 +14,7 @@ import numpy as np
 import soundfile as sf
 from rapidfuzz.distance import Levenshtein
 
-from . import chunk, cover, figures, formats, m4b, reading, speech, takes
+from . import chunk, cover, epub, figures, formats, m4b, reading, speech, sync, takes
 from .book import Book
 from .config import Settings
 from .formats.pages import from_pages, top_levels
@@ -142,6 +142,15 @@ def fix(book: Book, ctx: Context) -> None:
     for chapter, done in zip(data["chapters"], fixed, strict=True):
         chapter |= done
     book.write("fixed.json", data)
+
+
+def make_epub(book: Book, ctx: Context) -> None:
+    """The reading text as an EPUB, to go out with the m4b. The audiobook matters
+    more: a book whose EPUB fails is voiced all the same."""
+    try:
+        epub.build(book)
+    except Exception:
+        log.exception("%s: no EPUB", book.name)
 
 
 def normalize(book: Book, ctx: Context) -> None:
@@ -290,6 +299,11 @@ def assemble(book: Book, ctx: Context) -> None:
     book.write("chapters.json", made)
 
 
+def make_sync(book: Book, ctx: Context) -> None:
+    """`sync.json`: the reading text timed against the m4b."""
+    sync.write(book, [_final(book, i) for i in range(len(book.read("chunks.json")))])
+
+
 def _wav(book: Book, i: int) -> Path:
     return book.path(f"tts/{i:05}.wav")
 
@@ -334,11 +348,13 @@ STEPS = [
     Step("ocr", ocr),
     Step("figures", describe),
     Step("fix", fix),
+    Step("epub", make_epub),
     Step("normalize", normalize),
     Step("chunk", split),
     Step("tts", tts),
     Step("verify", verify),
     Step("assemble", assemble),
+    Step("sync", make_sync),
 ]
 
 
