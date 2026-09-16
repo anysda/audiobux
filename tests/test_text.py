@@ -1,7 +1,11 @@
 import json
+import shutil
+
+from test_pipeline import CountingTts, context, new_book
 
 from audiobux import cleanup, pipeline, speech
 from audiobux.speech import Speech
+from audiobux.takes import Heard, words
 
 
 class FakeLlm:
@@ -172,6 +176,116 @@ def test_cer_ignores_stress_case_digits_and_latin():
     latin = {"DDD": "ди-ди-д+и"}
     assert pipeline.cer("Вс+ё о ди-ди-д+и, три гл+авы.", "Все о DDD 3 главы", latin) == 0
     assert pipeline.cer("один два три", "один два") > 0.15
+
+
+def heard(text):
+    """Whisper's words of a clean take: each as long as its letters."""
+    out, t = [], 0.0
+    for w in words(text):
+        out.append((w, t, t + 0.07 * len(w)))
+        t += 0.07 * len(w) + 0.05
+    return Heard(text, out)
+
+
+class Ears:
+    """Hears the text of a piece only from the given take on."""
+
+    def __init__(self, texts, good_from_seed):
+        self.texts, self.good_from, self.calls = texts, good_from_seed, 0
+
+    def listen(self, wav):
+        self.calls += 1
+        return Heard("") if self.calls < self.good_from else heard(self.texts[0])
+
+    def listen_many(self, wavs):
+        return [self.listen(w) for w in wavs]
+
+
+def test_bad_take_is_voiced_again_then_reported(tmp_path, chekhov_epub):
+    tts = CountingTts()
+    ctx = context(tmp_path, tts)
+    book = new_book(tmp_path, chekhov_epub)
+    pipeline.run(book, ctx, until="tts")
+    pieces = book.read("chunks.json")
+    first = book.read("chunks.json")[:1]
+    book.write("chunks.json", first)
+
+    tts.calls = 0
+    ctx.models.listener = Ears([first[0]["text"]], good_from_seed=2)
+    pipeline.verify(book, ctx)
+    assert tts.calls == 1 and book.read("verify.json") == []
+
+    assert book.read("ready/00000.json")["seed"] == 1
+    calls = tts.calls
+    pipeline.verify(book, ctx)
+    assert tts.calls == calls, "a checked piece is not voiced again after a restart"
+
+    shutil.rmtree(book.path("ready"))
+    for take in book.path("tts").glob("*.s*.wav"):
+        take.unlink()
+    tts.calls = 0
+    ctx.models.listener = Ears([first[0]["text"]], good_from_seed=99)
+    pipeline.verify(book, ctx)
+    report = book.read("verify.json")
+    assert tts.calls == ctx.settings.verify_attempts - 1
+    assert [r["piece"] for r in report] == [0] and report[0]["cer"] == 1.0
+    assert len(pieces) > 1
+
+
+class QuietHoursOnce:
+    """Quiet hours at the first look, then never again; remembers whether the model was running then."""
+
+    def __init__(self, llm):
+        self.llm, self.left, self.model_running = llm, 60, None
+
+    def check(self):
+        return self.left
+
+    def wait(self):
+        self.model_running, self.left = self.llm.running, 0
+
+
+def test_language_model_lives_only_inside_its_step(tmp_path, chekhov_epub):
+    ctx = context(tmp_path, CountingTts())
+    book = new_book(tmp_path, chekhov_epub)
+    pipeline.run(book, ctx, until="figures")
+    llm = FakeLlm()
+    ctx.models.llm, ctx.models.editor, ctx.models.speech = llm, cleanup.Editor(llm), Speech(llm, accent="")
+
+    pipeline.fix(book, ctx)
+    assert llm.asked and not llm.running
+
+    ctx.quiet = QuietHoursOnce(llm)
+    llm.running = True
+    pipeline.normalize(book, ctx)
+    assert ctx.quiet.model_running is False, "stopped before quiet hours"
+    assert not llm.running
+
+
+class Stutterer(Ears):
+    """Hears a repeated syllable in the first take, then the text."""
+
+    def listen(self, wav):
+        self.calls += 1
+        h = heard(self.texts[0])
+        if self.calls == 1:
+            w, t0, _ = h.words[1]
+            h.words.insert(1, (w[:1], t0 - 0.05, t0))
+        return h
+
+
+def test_stutter_is_voiced_again(tmp_path, chekhov_epub):
+    tts = CountingTts()
+    ctx = context(tmp_path, tts)
+    book = new_book(tmp_path, chekhov_epub)
+    pipeline.run(book, ctx, until="tts")
+    first = book.read("chunks.json")[:1]
+    book.write("chunks.json", first)
+    tts.calls = 0
+    ctx.models.listener = Stutterer([first[0]["text"]], good_from_seed=0)
+    pipeline.verify(book, ctx)
+    assert tts.calls == 1 and book.read("verify.json") == []
+    assert book.read("ready/00000.json")["seed"] == 1
 
 
 def test_reader_pauses_marked_only_when_words_stay():

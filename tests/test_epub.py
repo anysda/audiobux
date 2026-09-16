@@ -1,3 +1,4 @@
+import shutil
 import zipfile
 from pathlib import Path
 
@@ -5,10 +6,65 @@ import lxml.html
 import pymupdf
 import pytest
 from ebooklib import epub as ebook
+from test_pipeline import context
 
-from audiobux import epub, figures
+from audiobux import epub, figures, pipeline
+from audiobux.book import Book
 
 SAID = "На рисунке 1.1 схема: три блока стоят в ряд и соединены стрелками слева направо."
+CAPTION = "Рис. 1.1. Три блока"
+FIRST = ["Глава 1. Начало", "Блоки", "Как они связаны"]
+
+
+@pytest.fixture(scope="session")
+def blocks_pdf(tmp_path_factory) -> Path:
+    """Two chapters, a section, a subsection below the audio chapters and a drawn figure with a caption."""
+    doc = pymupdf.open()
+    one = doc.new_page()
+    text = (
+        "Каждый из них отвечает за свою часть работы, и все они разные. Ниже показано, "
+        "как они стоят друг за другом и передают работу дальше по цепочке."
+    )
+    y = 60
+
+    def put(page, html, height=60):
+        nonlocal y
+        page.insert_htmlbox(pymupdf.Rect(60, y, page.rect.width - 60, y + height), html)
+        y += height + 10
+
+    put(one, "<h1>Глава 1. Начало</h1>", 40)
+    put(one, f"<p>{text}</p>")
+    put(one, "<h2>Блоки</h2>", 30)
+    put(one, f"<p>{text}</p>")
+    put(one, "<h3>Как они связаны</h3>", 30)
+    one.draw_rect(pymupdf.Rect(90, y - 5, 500, y + 85), color=(0, 0, 0))
+    for k in range(3):
+        one.draw_rect(pymupdf.Rect(100 + 130 * k, y, 200 + 130 * k, y + 80), color=(0, 0, 0), fill=(0.8, 0.8, 0.8))
+    for k in range(2):
+        one.draw_line(pymupdf.Point(200 + 130 * k, y + 40), pymupdf.Point(230 + 130 * k, y + 40))
+    y += 90
+    put(one, f"<p>{CAPTION}</p>", 25)
+    put(one, f"<p>{text}</p>")
+    y = 60
+    two = doc.new_page()
+    put(two, "<h1>Глава 2. Дальше</h1>", 40)
+    put(two, f"<p>{text}</p>")
+    put(two, f"<p>{text}</p>")
+    doc.set_toc([[1, FIRST[0], 1], [2, FIRST[1], 1], [3, FIRST[2], 1], [1, "Глава 2. Дальше", 2]])
+    path = tmp_path_factory.mktemp("blocks") / "Иванов - Блоки.pdf"
+    doc.save(path)
+    return path
+
+
+class Teller:
+    """A vision model that has one thing to say about every figure."""
+
+    def describe(self, found, folder, wait=lambda: None):
+        return [SAID for _ in found]
+
+
+def new_book(tmp_path, source: Path) -> Book:
+    return Book.create(tmp_path / "work", source.name, lambda p: shutil.copyfile(source, p))
 
 
 def read(path: Path) -> tuple[ebook.EpubBook, dict[str, lxml.html.HtmlElement]]:
@@ -34,6 +90,46 @@ def nav(path: Path) -> list:
         ]
 
     return walk(next(n for n in root.iter("nav") if "toc" in n.attrib.values()).find("ol"))
+
+
+def test_pdf_book_gets_chapters_headings_figure_and_cover(tmp_path, blocks_pdf):
+    ctx = context(tmp_path)
+    ctx.models.figures = Teller()
+    book = new_book(tmp_path, blocks_pdf)
+    pipeline.run(book, ctx, until="epub")
+
+    result, docs = read(book.path("book.epub"))
+    assert result.get_metadata("DC", "title")[0][0] == "Блоки"
+    assert result.get_metadata("DC", "creator")[0][0] == "Иванов"
+    assert result.get_metadata("DC", "language")[0][0] == "ru"
+    assert nav(book.path("book.epub")) == [(FIRST[0], [(FIRST[1], [(FIRST[2], [])])]), ("Глава 2. Дальше", [])]
+
+    assert len(docs) == 3, "the chapters of the m4b"
+    chapter = docs["text/0002.xhtml"]
+    assert [h.text_content() for h in chapter.iter("h2", "h3")] == FIRST[1:]
+    pictures = list(chapter.iter("img"))
+    assert len(pictures) == 1
+    assert pictures[0].get("alt") == SAID
+    assert chapter.find(".//figcaption").text_content() == CAPTION
+    assert SAID not in [p.text_content() for p in chapter.iter("p")], "the picture stands for its description"
+    picture = result.get_item_with_href(pictures[0].get("src").removeprefix("../"))
+    assert pymupdf.Pixmap(picture.get_content()).width > 100
+    texts = [e.text_content() for d in docs.values() for e in d.iter("h1", "h2", "h3", "p")]
+    for title in [*FIRST, "Глава 2. Дальше"]:
+        assert texts.count(title) == 1, f"{title}: the heading is not repeated by the text"
+
+    with zipfile.ZipFile(book.path("book.epub")) as z:
+        written = lxml.html.fromstring(z.read("EPUB/text/0002.xhtml"))
+    assert [link.get("href") for link in written.iter("link")] == ["../style.css"]
+    assert result.get_item_with_href("style.css") is not None
+    covers = [i for i in result.get_items() if i.get_name() == "images/cover.jpg"]
+    assert covers and covers[0].get_content() == book.path("cover.jpg").read_bytes(), "the cover of the m4b"
+
+
+def test_epub_source_goes_out_as_it_came(tmp_path, chekhov_epub):
+    book = new_book(tmp_path, chekhov_epub)
+    pipeline.run(book, context(tmp_path), until="epub")
+    assert book.path("book.epub").read_bytes() == chekhov_epub.read_bytes()
 
 
 def test_text_is_the_fixed_text_not_the_spoken_one(tmp_path):
@@ -103,3 +199,32 @@ def test_a_scan_figure_is_cut_only_when_the_counts_agree(tmp_path):
     found = figures.cut_scan(page, 0, ["В листинге цикл.", SAID], tmp_path)
     assert [f["said"] for f in found] == [SAID]
     assert pymupdf.Pixmap(str(tmp_path / found[0]["image"])).width > 300
+
+
+def test_scan_figures_reach_the_epub(tmp_path, blocks_pdf):
+    src = pymupdf.open(blocks_pdf)
+    scan = pymupdf.open()
+    for page in src:
+        out = scan.new_page(width=page.rect.width, height=page.rect.height)
+        out.insert_image(out.rect, pixmap=page.get_pixmap(dpi=150))
+    scan.set_toc(src.get_toc())
+    path = tmp_path / "Иванов - Блоки скан.pdf"
+    scan.save(path)
+    replies = [
+        "# Глава 1. Начало\n\nТекст первой главы о блоках.\n\n# Блоки\n\nЕщё текст.\n\n"
+        f"# Как они связаны\n\n[Рисунок: {SAID}]\n\nТекст после рисунка.",
+        "# Глава 2. Дальше\n\nТекст второй главы.",
+    ]
+
+    class Reader:
+        def page_text(self, image):
+            return replies[int(image.stem) - 1]
+
+    ctx = context(tmp_path)
+    ctx.models.ocr = Reader()
+    book = new_book(tmp_path, path)
+    pipeline.run(book, ctx, until="epub")
+    assert [f["said"] for f in book.read("figures.json")] == [SAID]
+    _, docs = read(book.path("book.epub"))
+    assert [i.get("alt") for d in docs.values() for i in d.iter("img")] == [SAID]
+    assert nav(book.path("book.epub")) == [(FIRST[0], [(FIRST[1], [(FIRST[2], [])])]), ("Глава 2. Дальше", [])]

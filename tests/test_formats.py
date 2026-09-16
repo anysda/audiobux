@@ -6,8 +6,9 @@ from pathlib import Path
 
 import pytest
 from conftest import stories
+from test_pipeline import context, new_book, probe
 
-from audiobux import formats
+from audiobux import formats, pipeline
 from audiobux.formats import Document, Kind
 from audiobux.formats.pages import from_pages, has_text_layer, top_levels
 
@@ -173,6 +174,16 @@ def tale(tmp_path, monkeypatch) -> Path:
     lines = [f"# {title}\n" + "\n".join(paragraphs[:2]) for title, paragraphs in stories()]
     path.write_bytes(MAGIC + "\n".join(lines).encode())
     return path
+
+
+def test_made_up_format_goes_all_the_way_to_m4b(tmp_path, tale):
+    assert ".tale" in formats.extensions()
+    book = new_book(tmp_path, tale)
+    result = pipeline.run(book, context(tmp_path))
+    info = probe(result)
+    assert [c["tags"]["title"] for c in info["chapters"]] == TITLES
+    assert info["format"]["tags"]["title"] == "Сказки"
+    assert book.path("book.epub").exists(), "a reading copy is built for it"
 
 
 BOOK = os.environ.get("AUDIOBUX_TEST_BOOK", "")

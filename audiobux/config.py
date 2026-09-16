@@ -8,6 +8,9 @@ from pathlib import Path
 class Settings:
     # everything a run keeps: work in progress and models
     data: Path = Path("data")
+    # HH:MM-HH:MM when the card rests, across midnight too; empty means round the clock
+    quiet_hours: str = ""
+    tz: str = "Europe/Moscow"
     toc_depth: int = 2
     tts: str = "tone"
     voice: Path = Path("voice/m1.wav")
@@ -42,6 +45,8 @@ class Settings:
         d = cls()
         return cls(
             data=Path(get("data", d.data)),
+            quiet_hours=get("quiet_hours", d.quiet_hours),
+            tz=get("tz", d.tz),
             toc_depth=int(get("toc_depth", d.toc_depth)),
             tts=get("tts", d.tts),
             voice=Path(get("voice", d.voice)),

@@ -19,12 +19,13 @@ from .book import Book
 from .config import Settings
 from .formats.pages import from_pages, top_levels
 from .models import Models
+from .quiet import QuietHours
 from .takes import Heard
 
 log = logging.getLogger(__name__)
 
 FIGURE_LINE = re.compile(r"^\[Рисунок:\s*(.*?)\]$", re.S)
-# pieces voiced or heard per round
+# pieces voiced or heard per round; quiet hours are checked between rounds
 ROUND = 32
 
 
@@ -32,6 +33,7 @@ ROUND = 32
 class Context:
     settings: Settings
     models: Models
+    quiet: QuietHours
 
 
 @dataclass
@@ -64,6 +66,7 @@ def ocr(book: Book, ctx: Context) -> None:
     scan = book.read("scan.json")
     pages, found = [], []
     for n, name in enumerate(scan["pages"]):
+        ctx.quiet.wait()
         text = ctx.models.ocr.page_text(book.path(name))
         page = blocks(text)
         pages.append([described(b) for b in page])
@@ -123,7 +126,7 @@ def describe(book: Book, ctx: Context) -> None:
     if found and ctx.models.figures:
         figures.near(data["chapters"], found)
         try:
-            told = ctx.models.figures.describe(found, book.dir)
+            told = ctx.models.figures.describe(found, book.dir, _llm_wait(ctx))
         finally:
             ctx.models.release_llm()
         book.write("figures.json", [f | {"said": t} for f, t in zip(found, told, strict=True)])
@@ -135,7 +138,7 @@ def fix(book: Book, ctx: Context) -> None:
     data = book.read("described.json")
     try:
         fixed = ctx.models.editor.fix(
-            [c["paragraphs"] for c in data["chapters"]], everything=book.path("scan.json").exists()
+            [c["paragraphs"] for c in data["chapters"]], _llm_wait(ctx), everything=book.path("scan.json").exists()
         )
     finally:
         ctx.models.release_llm()
@@ -159,14 +162,26 @@ def normalize(book: Book, ctx: Context) -> None:
     data = book.read("fixed.json")
     said = [[p for p in c["paragraphs"] if p] for c in data["chapters"]]
     try:
-        ready = ctx.models.speech.prepare(said, book.path("latin.txt"))
-        ready = ctx.models.speech.mark(ready)
+        ready = ctx.models.speech.prepare(said, book.path("latin.txt"), _llm_wait(ctx))
+        ready = ctx.models.speech.mark(ready, _llm_wait(ctx))
     finally:
         ctx.models.release_llm()
     for chapter, paragraphs in zip(data["chapters"], ready, strict=True):
         told = iter(paragraphs)
         chapter["paragraphs"] = [next(told) if p else "" for p in chapter["paragraphs"]]
     book.write("normalized.json", data)
+
+
+def _llm_wait(ctx: Context) -> Callable[[], None]:
+    """The language model lives only while a step uses it: it is stopped before
+    quiet hours and started again after them."""
+
+    def wait() -> None:
+        if ctx.quiet.check():
+            ctx.models.release_llm()
+            ctx.quiet.wait()
+
+    return wait
 
 
 def split(book: Book, ctx: Context) -> None:
@@ -182,7 +197,8 @@ def tts(book: Book, ctx: Context) -> None:
     pieces = book.read("chunks.json")
     book.path("tts").mkdir(exist_ok=True)
     while todo := [i for i in range(len(pieces)) if not _wav(book, i).exists()][:ROUND]:
-        _synth_all(book, ctx, todo, [pieces[i]["text"] for i in todo])
+        ctx.quiet.wait()
+        _synth_all(book, ctx, todo, [pieces[i]["text"] for i in todo], stop=ctx.quiet.check)
 
 
 def verify(book: Book, ctx: Context) -> None:
@@ -197,10 +213,12 @@ def verify(book: Book, ctx: Context) -> None:
     pieces = book.read("chunks.json")
     book.path("ready").mkdir(exist_ok=True)
     for at in range(0, len(pieces), ROUND):
+        ctx.quiet.wait()
         pending = [i for i in range(at, min(at + ROUND, len(pieces))) if not _ready(book, i).exists()]
         best: dict[int, dict[str, Any]] = {}
         for seed in range(ctx.settings.verify_attempts):
             if seed:
+                ctx.quiet.wait()
                 todo = [i for i in pending if not _take(book, i, seed).exists()]
                 _synth_all(
                     book, ctx, todo, [pieces[i]["text"] for i in todo], seed, path=partial(_take, book, seed=seed)

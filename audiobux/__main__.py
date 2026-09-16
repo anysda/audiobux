@@ -27,8 +27,9 @@ def main() -> None:
 
 def context(settings: Settings) -> "Context":
     from . import models, pipeline
+    from .quiet import QuietHours
 
-    return pipeline.Context(settings, models.load(settings))
+    return pipeline.Context(settings, models.load(settings), QuietHours(settings.quiet_hours, settings.tz))
 
 
 def voice_one(settings: Settings, file: Path, until: str | None, out: Path | None) -> None:
