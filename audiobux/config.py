@@ -6,8 +6,10 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class Settings:
-    # everything a run keeps: work in progress and models
+    # everything the service keeps: uploads, the library, work in progress, models, the database
     data: Path = Path("data")
+    # the worker's socket; empty means `<data>/run/worker.sock`
+    socket: str = ""
     # HH:MM-HH:MM when the card rests, across midnight too; empty means round the clock
     quiet_hours: str = ""
     tz: str = "Europe/Moscow"
@@ -26,6 +28,15 @@ class Settings:
     verify_attempts: int = 3
 
     @property
+    def incoming(self) -> Path:
+        """Uploads as the web process wrote them, before the worker takes them."""
+        return self.data / "incoming"
+
+    @property
+    def library(self) -> Path:
+        return self.data / "library"
+
+    @property
     def work(self) -> Path:
         return self.data / "work"
 
@@ -34,8 +45,17 @@ class Settings:
         return self.data / "models"
 
     @property
+    def web(self) -> Path:
+        """The one folder the web process writes to besides incoming/: where the listener is."""
+        return self.data / "web"
+
+    @property
     def db(self) -> Path:
         return self.data / "audiobux.db"
+
+    @property
+    def worker_socket(self) -> Path:
+        return Path(self.socket) if self.socket else self.data / "run" / "worker.sock"
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] = os.environ) -> "Settings":
@@ -45,6 +65,7 @@ class Settings:
         d = cls()
         return cls(
             data=Path(get("data", d.data)),
+            socket=get("socket", d.socket),
             quiet_hours=get("quiet_hours", d.quiet_hours),
             tz=get("tz", d.tz),
             toc_depth=int(get("toc_depth", d.toc_depth)),

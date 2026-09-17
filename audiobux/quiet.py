@@ -74,6 +74,10 @@ class QuietHours:
         if self.on_resume:
             self.on_resume()
 
+    def interrupt(self) -> None:
+        """Wakes a sleep early, so the worker sees a new or a deleted book at once."""
+        self._wake.set()
+
     def _nap(self, seconds: float) -> None:
         self._wake.wait(seconds)
         self._wake.clear()

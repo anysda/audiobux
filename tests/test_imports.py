@@ -4,11 +4,14 @@ after them, the list of formats and the socket contract are light enough for any
 process, and the web process reaches nothing of the worker but the contract."""
 
 import ast
+import sys
 from pathlib import Path
 
 PACKAGE = Path(__file__).parent.parent / "audiobux"
 # what the formats may not reach
 OUTSIDE_FORMATS = {"models", "llm", "f5", "takes", "speech", "chunk", "cleanup", "figures", "pipeline", "worker"}
+# the list of formats and the socket contract: the web process takes them, so the standard library only
+LIGHT = ("formats", "contract")
 
 
 def modules() -> dict[str, Path]:
@@ -77,6 +80,14 @@ def test_formats_know_nothing_of_models_and_steps() -> None:
     assert len(readers) > 3
     for name in readers:
         assert not reach(edges, name) & OUTSIDE_FORMATS, name
+
+
+def test_the_list_of_formats_and_the_contract_are_light() -> None:
+    known, edges = modules(), graph()
+    for light in LIGHT:
+        for name in {light} | reach(edges, light):
+            outside = imports(name, known[name])[1]
+            assert outside <= sys.stdlib_module_names, f"{name} imports {outside - sys.stdlib_module_names}"
 
 
 def test_the_check_sees_heavy_imports_and_package_paths(tmp_path) -> None:

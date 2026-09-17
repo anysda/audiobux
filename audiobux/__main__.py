@@ -1,6 +1,7 @@
 import argparse
 import logging
 import shutil
+import signal
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -15,6 +16,7 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     parser = argparse.ArgumentParser(prog="audiobux")
     sub = parser.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("worker", help="voice the queue and answer the web process on the socket")
     one = sub.add_parser("book", help="voice a single local file, without the queue")
     one.add_argument("file", type=Path)
     one.add_argument("--until")
@@ -22,7 +24,17 @@ def main() -> None:
     args = parser.parse_args()
     settings = Settings.from_env()
 
-    voice_one(settings, args.file, args.until, args.out)
+    if args.cmd == "worker":
+        from . import worker
+
+        # docker stop sends SIGTERM; exiting normally lets the models close.
+        # Whatever was voiced so far is on disk and the next start goes on from there.
+        signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+        queue = worker.Worker(settings, context(settings))
+        queue.serve()
+        queue.run()
+    else:
+        voice_one(settings, args.file, args.until, args.out)
 
 
 def context(settings: Settings) -> "Context":
