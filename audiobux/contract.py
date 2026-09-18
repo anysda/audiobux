@@ -102,6 +102,13 @@ class Done(TypedDict):
     id: str
 
 
+class Models(TypedDict):
+    ready: bool
+    # bytes downloaded and to download while the models are being fetched, else null
+    done: int | None
+    total: int | None
+
+
 class Quiet(TypedDict):
     # HH:MM-HH:MM, null when the card works round the clock
     window: str | None
@@ -115,6 +122,7 @@ class Format(TypedDict):
 
 
 class Status(TypedDict):
+    models: Models
     queue: int
     quiet: Quiet
     formats: list[Format]

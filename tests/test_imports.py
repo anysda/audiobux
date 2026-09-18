@@ -8,6 +8,21 @@ import sys
 from pathlib import Path
 
 PACKAGE = Path(__file__).parent.parent / "audiobux"
+# what the models may not reach, directly or through another module
+OUTSIDE_MODELS = {
+    "epub",
+    "m4b",
+    "cover",
+    "webcover",
+    "book",
+    "pipeline",
+    "worker",
+    "library",
+    "contract",
+    "web",
+    "listening",
+    "__main__",
+}
 # what the formats may not reach
 OUTSIDE_FORMATS = {"models", "llm", "f5", "takes", "speech", "chunk", "cleanup", "figures", "pipeline", "worker"}
 # the list of formats and the socket contract: the web process takes them, so the standard library only
@@ -72,6 +87,13 @@ def test_no_cycles() -> None:
     edges = graph()
     looped = sorted(m for m in edges if m in reach(edges, m))
     assert not looped, f"modules in an import cycle: {looped}"
+
+
+def test_models_stay_inside() -> None:
+    for name in ("models", "fetch"):
+        reached = reach(graph(), name)
+        assert not reached & OUTSIDE_MODELS, name
+        assert not [m for m in reached if is_format(m)], name
 
 
 def test_formats_know_nothing_of_models_and_steps() -> None:

@@ -18,11 +18,12 @@ dependencies = [
     "ruaccent>=1.5.8",
     "rutextnorm>=2.1",
     "soundfile>=0.12",
+    "tqdm>=4.65",
 ]
 
 [project.optional-dependencies]
 test = ["pytest>=8", "pytest-cov>=5"]
-dev = ["audiobux[test]", "ruff>=0.15", "mypy>=1.15", "vulture>=2.14", "pre-commit>=4"]
+dev = ["audiobux[test]", "ruff>=0.15", "mypy>=1.15", "vulture>=2.14", "pre-commit>=4", "types-tqdm>=4.65"]
 # what F5-TTS 1.1.22 imports for inference; the image puts f5-tts itself on top with --no-deps
 f5 = ["matplotlib>=3.7", "pydub>=0.25", "pypinyin>=0.50", "rjieba>=0.1", "safetensors>=0.4", "torch>=2.6",
       "torchaudio>=2.6", "torchcodec>=0.12", "torchdiffeq>=0.2", "tqdm>=4.65", "transformers>=4.40",

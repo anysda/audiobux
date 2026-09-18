@@ -1,6 +1,7 @@
 """The worker: books from the queue, one at a time, and the socket the web process asks.
 
-The models load on first use. Each book's progress lives in
+The models are fetched first, in the background (see `fetch`): until they are in
+place the queue waits. They load on first use. Each book's progress lives in
 `work/<id>/` (see `pipeline`), so a restarted worker, or a failed book tried
 again, goes on from the step and the piece it stopped at.
 """
@@ -19,7 +20,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from . import contract, formats, pipeline
+from . import contract, fetch, formats, pipeline
 from .book import Book
 from .config import Settings
 from .contract import Fault
@@ -38,8 +39,10 @@ class Stopped(BaseException):
 
 
 class Worker:
-    def __init__(self, settings: Settings, ctx: pipeline.Context) -> None:
+    def __init__(self, settings: Settings, ctx: pipeline.Context, hub: fetch.Hub | None = None) -> None:
         self.settings, self.ctx = settings, ctx
+        # a book is taken once the models are in place, which wakes the queue
+        self.fetch = fetch.Fetch(settings, hub, on_ready=ctx.quiet.interrupt)
         self.library = Library(settings)
         self.library.requeue()
         # taking the next book and deleting one never cross
@@ -52,11 +55,12 @@ class Worker:
         quiet.on_check, quiet.on_pause, quiet.on_resume = self._check, self._pause, self._resume
 
     def run(self, until_idle: bool = False) -> None:
-        """Voices the queue; with `until_idle`, returns once it is empty."""
+        """Voices the queue once the models are in place; with `until_idle`, returns once it is empty."""
+        self.fetch.start()
         while True:
             left = self.ctx.quiet.seconds_left()
             with self.lock:
-                row = None if left else self.library.next()
+                row = None if left or not self.fetch.ready else self.library.next()
                 if row:
                     self.current, self.deleted = (row["id"], self._workdir(row["id"], row["title"])), False
             if self.current:
@@ -232,7 +236,9 @@ class Worker:
 
     def status(self) -> contract.Status:
         quiet = self.ctx.quiet
+        done, total = self.fetch.progress()
         return contract.Status(
+            models=contract.Models(ready=self.fetch.ready, done=done, total=total),
             queue=self.library.queue(),
             quiet=contract.Quiet(window=quiet.spec or None, tz=self.settings.tz, active=bool(quiet.seconds_left())),
             formats=[contract.Format(name=k.name, extensions=list(k.extensions)) for k in formats.KINDS],

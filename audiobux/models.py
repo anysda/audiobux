@@ -14,6 +14,7 @@ from typing import Any, Protocol
 
 import numpy as np
 
+from . import fetch
 from .cleanup import Editor
 from .config import Settings
 from .figures import Figures
@@ -198,6 +199,7 @@ def load(settings: Settings) -> Models:
             context=8192,
             vision=settings.ocr_vision,
             placement=("--fit", "on"),
+            revision=fetch.revision,
         )
         if settings.ocr
         else None
@@ -206,13 +208,15 @@ def load(settings: Settings) -> Models:
     if settings.llm and vision and settings.llm == settings.ocr:
         llm = vision
     else:
-        llm = Llm(settings.llm, settings.models) if settings.llm else None
+        llm = Llm(settings.llm, settings.models, revision=fetch.revision) if settings.llm else None
     return Models(
         ocr=VlmOcr(vision) if vision else None,
         editor=Editor(llm, settings.fix_max_change),
         speech=Speech(llm, settings.accent, settings.stress == "plus", settings.models),
         tts=tts,
-        listener=Whisper(settings.asr, settings.models) if settings.asr else None,
+        listener=Whisper(settings.asr, settings.models, revision=fetch.revision(fetch.whisper_repo(settings.asr)))
+        if settings.asr
+        else None,
         llm=llm,
         figures=Figures(vision, llm) if vision else None,
         aligner=aligner,
