@@ -32,7 +32,10 @@ def main() -> None:
         signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
         queue = worker.Worker(settings, context(settings))
         queue.serve()
-        queue.run()
+        try:
+            queue.run()
+        finally:
+            queue.unload()
     else:
         voice_one(settings, args.file, args.until, args.out)
 

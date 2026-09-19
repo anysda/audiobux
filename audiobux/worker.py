@@ -1,12 +1,14 @@
 """The worker: books from the queue, one at a time, and the socket the web process asks.
 
 The models are fetched first, in the background (see `fetch`): until they are in
-place the queue waits. They load on first use. Each book's progress lives in
+place the queue waits. They load on first use and are let go after every step and
+for the quiet hours, so an idle worker holds nothing on the card. Each book's progress lives in
 `work/<id>/` (see `pipeline`), so a restarted worker, or a failed book tried
 again, goes on from the step and the piece it stopped at.
 """
 
 import contextlib
+import gc
 import hashlib
 import json
 import logging
@@ -15,6 +17,7 @@ import queue
 import shutil
 import socketserver
 import stat
+import sys
 import threading
 import time
 from pathlib import Path
@@ -51,6 +54,7 @@ class Worker:
         self.deleted = False
         self.subscribers: set[queue.Queue[contract.Event]] = set()
         self._saved = 0.0
+        self._lazy = _lazy_attributes(ctx.models)
         quiet = ctx.quiet
         quiet.on_check, quiet.on_pause, quiet.on_resume = self._check, self._pause, self._resume
 
@@ -72,6 +76,7 @@ class Worker:
 
     def voice(self, book_id: str, book: Book) -> None:
         self._set(book_id, state="running")
+        self._lazy = _lazy_attributes(self.ctx.models)  # nothing is loaded between books
         step = "extract"
         try:
             for s in pipeline.STEPS:
@@ -80,6 +85,7 @@ class Worker:
                     self._set(book_id, step=step)
                     pipeline.run(book, self.ctx, until=step)
                     self._progress(book_id, book, about(book))
+                    self.unload()  # the next step loads its own model
             step = "publish"
             self._publish(book_id, book)
             log.info("%s: done", book_id)
@@ -93,6 +99,11 @@ class Worker:
                 deleted, self.current = self.deleted, None
             if deleted:
                 self.library.remove_files(book_id)
+            self.unload()
+
+    def unload(self) -> None:
+        """Takes every model off the card; each one loads itself again when used."""
+        unload(self.ctx.models, self._lazy)
 
     def _workdir(self, book_id: str, title: str) -> Book:
         """The book's working directory, its source linked from the library."""
@@ -141,6 +152,7 @@ class Worker:
             self._progress(*self.current)
 
     def _pause(self) -> None:
+        self.unload()
         if self.current:
             self._progress(*self.current, state="paused")
 
@@ -320,6 +332,36 @@ def pieces(book: Book) -> tuple[int, int]:
     total = len(book.read("chunks.json"))
     done = sum(1 for p in book.path("tts").glob("*.wav") if not p.name.endswith(".tmp.wav"))
     return total, min(done, total)
+
+
+def unload(models: object, lazy: dict[int, set[str]]) -> None:
+    """A model is closed if it can be, and anything it loaded on first use (the
+    attributes that were None or missing when it was made) is let go."""
+    for model in vars(models).values():
+        if model is None:
+            continue
+        close = getattr(model, "close", None)
+        if callable(close):
+            close()
+        keep = lazy.get(id(model))
+        if keep is not None:
+            for key in list(vars(model)):
+                if key not in keep:
+                    setattr(model, key, None)
+    gc.collect()
+    if "torch" in sys.modules:
+        torch = sys.modules["torch"]
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+
+def _lazy_attributes(models: object) -> dict[int, set[str]]:
+    """For every model, the attributes it was made with (all but those still None)."""
+    return {
+        id(m): {k for k, v in vars(m).items() if v is not None}
+        for m in vars(models).values()
+        if m is not None and hasattr(m, "__dict__")
+    }
 
 
 def _sha256(path: Path) -> str:
