@@ -17,6 +17,7 @@ import queue
 import shutil
 import socketserver
 import stat
+import subprocess
 import sys
 import threading
 import time
@@ -251,6 +252,7 @@ class Worker:
         done, total = self.fetch.progress()
         return contract.Status(
             models=contract.Models(ready=self.fetch.ready, done=done, total=total),
+            card=card(),
             queue=self.library.queue(),
             quiet=contract.Quiet(window=quiet.spec or None, tz=self.settings.tz, active=bool(quiet.seconds_left())),
             formats=[contract.Format(name=k.name, extensions=list(k.extensions)) for k in formats.KINDS],
@@ -332,6 +334,26 @@ def pieces(book: Book) -> tuple[int, int]:
     total = len(book.read("chunks.json"))
     done = sum(1 for p in book.path("tts").glob("*.wav") if not p.name.endswith(".tmp.wav"))
     return total, min(done, total)
+
+
+def card() -> contract.Card | None:
+    """The first video card as nvidia-smi sees it."""
+    try:
+        out = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=name,memory.used,memory.total,utilization.gpu",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=True,
+        ).stdout
+        name, used, total, load = (v.strip() for v in out.splitlines()[0].split(","))
+        return contract.Card(name=name, memory_used=int(used), memory_total=int(total), load=int(load))
+    except (OSError, subprocess.SubprocessError, ValueError, IndexError):
+        return None
 
 
 def unload(models: object, lazy: dict[int, set[str]]) -> None:

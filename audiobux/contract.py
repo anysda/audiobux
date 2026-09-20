@@ -109,6 +109,13 @@ class Models(TypedDict):
     total: int | None
 
 
+class Card(TypedDict):
+    name: str
+    memory_used: int
+    memory_total: int
+    load: int
+
+
 class Quiet(TypedDict):
     # HH:MM-HH:MM, null when the card works round the clock
     window: str | None
@@ -123,6 +130,8 @@ class Format(TypedDict):
 
 class Status(TypedDict):
     models: Models
+    # the video card, null when there is none or it is not seen
+    card: Card | None
     queue: int
     quiet: Quiet
     formats: list[Format]
