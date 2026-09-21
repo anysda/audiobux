@@ -27,6 +27,9 @@ OUTSIDE_MODELS = {
 OUTSIDE_FORMATS = {"models", "llm", "f5", "takes", "speech", "chunk", "cleanup", "figures", "pipeline", "worker"}
 # the list of formats and the socket contract: the web process takes them, so the standard library only
 LIGHT = ("formats", "contract")
+# all the web process may reach of the package: the contract, the formats, the settings,
+# its own store of where the listener is, and itself
+WEB_MAY_REACH = {"contract", "config", "formats", "formats.document", "listening"}
 
 
 def modules() -> dict[str, Path]:

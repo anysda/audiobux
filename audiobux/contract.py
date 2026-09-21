@@ -36,6 +36,7 @@ TITLE_LIMIT = 200
 METHODS: dict[str, tuple[str, ...]] = {
     "book.submit": ("upload_id", "title"),
     "book.delete": ("id",),
+    "book.retry": ("id",),
     "library.list": (),
     "book.get": ("id",),
     "status.read": (),
@@ -49,6 +50,7 @@ Error = Literal[
     "timeout",
     "not-found",  # no such book or upload
     "not-a-book",  # the upload is not in any format the worker reads
+    "conflict",  # retry of a book that has not failed
     "unavailable",  # the worker does not answer (said by the caller's side)
     "internal",
 ]

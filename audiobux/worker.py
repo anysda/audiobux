@@ -196,6 +196,8 @@ class Worker:
             return self.submit(params["upload_id"], params["title"])
         if method == "book.delete":
             return self.delete(params["id"])
+        if method == "book.retry":
+            return self.retry(params["id"])
         if method == "library.list":
             return [self.library.info(row) for row in self.library.books()]
         if method == "book.get":
@@ -246,6 +248,14 @@ class Worker:
                 self.library.remove_files(book_id)
         self._emit(contract.Event(type="deleted", id=book_id))
         return contract.Done(id=book_id)
+
+    def retry(self, book_id: str) -> contract.Book:
+        """A failed book goes back to the queue and on from the step it failed at."""
+        if self._row(book_id)["state"] != "failed":
+            raise Fault("conflict")
+        self._set(book_id, state="queued", error=None)
+        self.ctx.quiet.interrupt()
+        return self.library.info(self._row(book_id))
 
     def status(self) -> contract.Status:
         quiet = self.ctx.quiet

@@ -7,6 +7,7 @@ import pymupdf
 import pytest
 from ebooklib import epub as ebook
 from test_pipeline import context
+from test_worker import make, submit
 
 from audiobux import epub, figures, pipeline
 from audiobux.book import Book
@@ -228,3 +229,12 @@ def test_scan_figures_reach_the_epub(tmp_path, blocks_pdf):
     _, docs = read(book.path("book.epub"))
     assert [i.get("alt") for d in docs.values() for i in d.iter("img")] == [SAID]
     assert nav(book.path("book.epub")) == [(FIRST[0], [(FIRST[1], [(FIRST[2], [])])]), ("Глава 2. Дальше", [])]
+
+
+def test_epub_goes_next_to_the_m4b(tmp_path, chekhov_epub):
+    w = make(tmp_path)
+    book_id = submit(w, chekhov_epub)
+    w.run(until_idle=True)
+    folder = w.settings.library / book_id
+    assert (folder / "book.m4b").exists()
+    assert (folder / "book.epub").read_bytes() == chekhov_epub.read_bytes()
