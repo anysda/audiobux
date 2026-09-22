@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from audiobux import contract, fetch, models, pipeline, worker
+from audiobux.book import Book
 from audiobux.config import Settings
 from audiobux.contract import Fault
 from audiobux.quiet import QuietHours
@@ -195,6 +196,61 @@ def test_restart_goes_on_from_the_last_piece(tmp_path, chekhov_epub):
     row = state(restarted, book_id)
     assert row["state"] == "done" and (restarted.settings.library / book_id / "book.m4b").exists()
     assert row["pieces_total"] > 5 and tts.calls == row["pieces_total"] - 5
+
+
+def test_failed_book_says_why_without_paths_and_the_queue_goes_on(tmp_path, chekhov_scan, chekhov_epub):
+    w = make(tmp_path)
+    scan, book = submit(w, chekhov_scan), submit(w, chekhov_epub)
+
+    w.run(until_idle=True)
+
+    failed = w.library.info(w.library.get(scan))
+    assert (failed["state"], failed["step"]) == ("failed", "ocr")
+    assert "распознавание сканов" in failed["error"] and "не подключено" in failed["error"]
+    assert "/" not in failed["error"] and str(tmp_path) not in failed["error"]
+    assert state(w, book)["state"] == "done"
+
+    w.run(until_idle=True)
+    assert state(w, scan)["state"] == "failed", "a failed book waits to be retried"
+
+
+def test_retry_goes_on_from_the_step_that_failed(tmp_path, chekhov_epub, monkeypatch):
+    def card_lost(n):
+        if n == 4:
+            raise RuntimeError("CUDA error: out of memory at /opt/secret/f5.py")
+
+    tts = CountingTts(card_lost)
+    w = make(tmp_path, tts)
+    book_id = submit(w, chekhov_epub)
+    w.run(until_idle=True)
+
+    row = state(w, book_id)
+    assert (row["state"], row["step"]) == ("failed", "tts")
+    assert row["error"] == "Этап «озвучка»: сбой во время работы. Подробности в журнале worker."
+    assert Book(w.settings.work / book_id).done("chunk"), "the work so far stays for the retry"
+    with pytest.raises(Fault) as refused:
+        w.retry(uuid.uuid4().hex)
+    assert refused.value.error == "not-found"
+
+    tts.on_call = None
+    assert w.retry(book_id)["state"] == "queued"
+    with pytest.raises(Fault) as refused:
+        w.retry(book_id)
+    assert refused.value.error == "conflict", "only a failed book is retried"
+    seen = []
+    run = pipeline.run
+
+    def steps(book, ctx, until=None):
+        seen.append(until)
+        return run(book, ctx, until)
+
+    monkeypatch.setattr(pipeline, "run", steps)
+    w.run(until_idle=True)
+
+    assert seen[0] == "tts", "the steps before the failed one are not run again"
+    assert state(w, book_id)["state"] == "done" and state(w, book_id)["error"] is None
+    total = state(w, book_id)["pieces_total"]
+    assert tts.calls == total, "the three pieces voiced before the failure are not voiced again"
 
 
 # quiet hours
@@ -468,6 +524,14 @@ def drain(q) -> list:
     while not q.empty():
         got.append(q.get())
     return got
+
+
+def test_error_text_never_carries_the_exception():
+    secret = "/data/library/abc/source.pdf"
+    for step in ("extract", "ocr", "chunk", "tts", "assemble"):
+        assert secret not in worker.error_text(step, RuntimeError(secret))
+    assert "не нашлось текста" in worker.error_text("chunk", ValueError("no text found in the book"))
+    assert "не удалось прочитать" in worker.error_text("extract", ValueError(secret))
 
 
 def test_events_are_json_lines():

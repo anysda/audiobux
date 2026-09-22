@@ -37,6 +37,21 @@ IDLE = 60
 # progress goes to the database and to the events at most this often
 PROGRESS_EVERY = 5.0
 
+STEPS_RU = {
+    "extract": "извлечение текста",
+    "ocr": "распознавание сканов",
+    "figures": "описание рисунков",
+    "fix": "правка текста",
+    "epub": "сборка epub",
+    "normalize": "подготовка текста к чтению",
+    "chunk": "нарезка на куски",
+    "tts": "озвучка",
+    "verify": "проверка на слух",
+    "assemble": "сборка m4b",
+    "sync": "привязка текста к звуку",
+    "publish": "перенос в библиотеку",
+}
+
 
 class Stopped(BaseException):
     """The book being voiced was deleted. Not an `Exception`, so no step catches it."""
@@ -94,7 +109,7 @@ class Worker:
             log.info("%s: deleted while being voiced, stopped", book_id)
         except Exception as e:
             log.exception("%s: failed at %s", book_id, step)
-            self._set(book_id, state="failed", step=step, error=f"{step}: {e}")
+            self._set(book_id, state="failed", step=step, error=error_text(step, e))
         finally:
             with self.lock:
                 deleted, self.current = self.deleted, None
@@ -344,6 +359,19 @@ def pieces(book: Book) -> tuple[int, int]:
     total = len(book.read("chunks.json"))
     done = sum(1 for p in book.path("tts").glob("*.wav") if not p.name.endswith(".tmp.wav"))
     return total, min(done, total)
+
+
+def error_text(step: str, error: Exception) -> str:
+    """What went wrong, in words for the listener: no paths, no trace."""
+    if isinstance(error, NotImplementedError) and step == "ocr":
+        what = "это скан без текстового слоя, а распознавание сканов не подключено."
+    elif step == "chunk" and "no text" in str(error):
+        what = "в книге не нашлось текста, который можно прочитать."
+    elif step == "extract":
+        what = "файл не удалось прочитать: возможно, он повреждён или защищён."
+    else:
+        what = "сбой во время работы. Подробности в журнале worker."
+    return f"Этап «{STEPS_RU.get(step, step)}»: {what}"
 
 
 def card() -> contract.Card | None:
