@@ -26,6 +26,12 @@ class Settings:
     asr: str = "large-v3-turbo"
     verify_cer: float = 0.15
     verify_attempts: int = 3
+    # the largest upload in MiB: a scanned book with pictures runs to a few hundred
+    upload_mb: int = 1024
+    # host names the web process answers to besides IP addresses and localhost, comma-separated
+    hosts: str = ""
+    # the built interface the web process serves; nothing is served when it is not there
+    frontend: Path = Path("frontend/dist")
 
     @property
     def incoming(self) -> Path:
@@ -81,4 +87,7 @@ class Settings:
             asr=get("asr", d.asr),
             verify_cer=float(get("verify_cer", d.verify_cer)),
             verify_attempts=int(get("verify_attempts", d.verify_attempts)),
+            upload_mb=int(get("upload_mb", d.upload_mb)),
+            hosts=get("hosts", d.hosts),
+            frontend=Path(get("frontend", d.frontend)),
         )

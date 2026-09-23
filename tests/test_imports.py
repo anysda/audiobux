@@ -115,6 +115,13 @@ def test_the_list_of_formats_and_the_contract_are_light() -> None:
             assert outside <= sys.stdlib_module_names, f"{name} imports {outside - sys.stdlib_module_names}"
 
 
+def test_web_reaches_only_the_contract_and_the_formats() -> None:
+    edges = graph()
+    assert reach(edges, "web") <= WEB_MAY_REACH, sorted(reach(edges, "web") - WEB_MAY_REACH)
+    assert "web" not in reach(edges, "worker"), "the worker knows nothing of the web process"
+    assert "contract" in reach(edges, "worker")
+
+
 def test_the_check_sees_heavy_imports_and_package_paths(tmp_path) -> None:
     """The checks above find what they look for: a parent import and a heavy library."""
     probe = tmp_path / "probe.py"

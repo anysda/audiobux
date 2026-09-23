@@ -7,7 +7,7 @@ import pytest
 import soundfile as sf
 from test_pipeline import context, new_book, probe
 
-from audiobux import cleanup, pipeline, reading, sync
+from audiobux import cleanup, pipeline, reading, sync, web
 from audiobux.config import Settings
 from audiobux.takes import Word
 
@@ -107,6 +107,30 @@ def spans(data):
                 yield item["t0"], item["t1"]
 
 
+def test_schema(voiced):
+    data = voiced.read("sync.json")
+    assert set(data) == {"version", "duration", "chapters"} and data["version"] == 1
+    assert [c["title"] for c in data["chapters"]] == ["Глава 1", "Глава 2", "Глава 3"]
+    assert all(list(c) == ["title", "t0", "t1", "blocks"] for c in data["chapters"])
+    first = data["chapters"][0]["blocks"]
+    assert [b["type"] for b in first] == ["h", "p", "code", "p", "figure", "p"]
+    assert set(first[0]) == {"type", "text", "t0", "t1"} and first[0]["text"] == "Глава 1"
+    assert [s["text"] for s in first[1]["sentences"]] == [
+        "Заказ собирает товары.",
+        "Второе предложение чуть длиннее первого.",
+    ]
+    assert first[2] == first[2] | {"text": CODE} and first[2]["t0"] is not None
+    figure = first[4]
+    assert set(figure) == {"type", "src", "alt", "t0", "t1"} and figure["alt"] == SAID
+    assert figure["src"] == "figures/0001.jpg" and voiced.path(figure["src"]).read_bytes()[:2] == b"\xff\xd8"
+    assert web.FIGURE.fullmatch(figure["src"].removeprefix("figures/"))
+    # the listing nobody tells: the only block of chapter 3, and no time
+    last = data["chapters"][2]
+    assert last["blocks"] == [{"type": "h", "text": "Глава 3", "t0": None, "t1": None}] + [
+        {"type": "code", "text": "int x = 1; return x;", "t0": None, "t1": None}
+    ]
+
+
 def test_every_heard_block_has_a_time_and_only_those_have_none(voiced):
     data = voiced.read("sync.json")
     for chapter in data["chapters"][:2]:
@@ -189,6 +213,18 @@ def test_a_voiced_chapter_heading_is_its_first_paragraph(tmp_path):
     data = {"title": "К", "chapters": [{"title": "Глава 1", "paragraphs": ["ГЛАВА 1", "Текст."], "listings": {}}]}
     (chapter,) = reading.chapters(data, [], tmp_path, "К.pdf")
     assert [(b.kind, b.text, b.said) for b in chapter.blocks] == [("h", "Глава 1", 0), ("p", "Текст.", 1)]
+
+
+def test_a_figure_gets_a_name_the_web_serves(tmp_path):
+    source = tmp_path / "Книга.epub"
+    source.write_bytes(b"")
+    book = new_book(tmp_path, source)
+    (book.dir / "figures").mkdir()
+    pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 30, 20), 1)
+    pix.clear_with(200)
+    pix.save(book.path("figures/Рис 1.2 Заказ.png"))
+    src = sync._picture(book, {"image": "figures/Рис 1.2 Заказ.png"})
+    assert src and web.FIGURE.fullmatch(src.removeprefix("figures/")) and book.path(src).exists()
 
 
 def test_the_cli_copies_the_sync_and_its_figures_out(tmp_path, monkeypatch, voiced):

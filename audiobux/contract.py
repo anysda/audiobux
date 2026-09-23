@@ -19,13 +19,20 @@ the connection is closed.
 This module is the standard library only: the web process imports it.
 """
 
+import asyncio
 import json
 import re
+import socket
 import unicodedata
-from typing import Literal, NotRequired, TypedDict
+from collections.abc import AsyncIterator
+from pathlib import Path
+from typing import Any, Literal, NotRequired, TypedDict
 
 REQUEST_LIMIT = 4096
+ANSWER_LIMIT = 16 * 1024 * 1024
 READ_TIMEOUT = 3.0
+# how long the caller waits for an answer; submitting a big file hashes it first
+ANSWER_TIMEOUT = 60.0
 # an idle event stream sends a ping this often, so a gone reader is noticed
 PING_EVERY = 15.0
 
@@ -194,3 +201,77 @@ def notice(message: object) -> bytes:
 
 def refusal(error: Error) -> bytes:
     return json.dumps({"ok": False, "error": error}).encode() + b"\n"
+
+
+def call(path: Path, method: str, **params: str) -> Any:
+    """Asks the worker; the result, or `Fault` with the worker's error."""
+    with _connect(path, method, params) as conn:
+        return _result(_line(conn.makefile("rb")))
+
+
+async def subscribe(path: Path) -> AsyncIterator[Event]:
+    """The worker's events as they come, pings included, until the worker goes.
+    Connects at once: `Fault` here, not on the first event, when the worker is not there.
+    Asynchronous, so that a reader waiting for the next event holds no thread."""
+    try:
+        reader, writer = await asyncio.wait_for(asyncio.open_unix_connection(path, limit=ANSWER_LIMIT), READ_TIMEOUT)
+    except (OSError, TimeoutError):
+        raise Fault("unavailable") from None
+    try:
+        writer.write(request("events.subscribe"))
+        _result(await _next(reader, ANSWER_TIMEOUT))
+    except BaseException:
+        writer.close()
+        raise
+    return _events(reader, writer)
+
+
+async def _events(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> AsyncIterator[Event]:
+    try:
+        while True:
+            event: Event = json.loads(await _next(reader, PING_EVERY * 3))
+            yield event
+    except Fault:
+        return  # the worker went, or stopped sending even pings
+    finally:
+        writer.close()
+
+
+async def _next(reader: asyncio.StreamReader, timeout: float) -> bytes:
+    try:
+        line = await asyncio.wait_for(reader.readline(), timeout)
+    except (OSError, TimeoutError, ValueError):  # ValueError: a line over the limit
+        raise Fault("unavailable") from None
+    if not line.endswith(b"\n"):
+        raise Fault("unavailable")
+    return line
+
+
+def _connect(path: Path, method: str, params: dict[str, str]) -> socket.socket:
+    """A connection with the request sent."""
+    conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    conn.settimeout(ANSWER_TIMEOUT)
+    try:
+        conn.connect(str(path))
+        conn.sendall(request(method, **params))
+    except OSError:
+        conn.close()
+        raise Fault("unavailable") from None
+    return conn
+
+
+def _line(stream: Any) -> bytes:
+    try:
+        line: bytes = stream.readline(ANSWER_LIMIT)
+    except OSError:
+        raise Fault("unavailable") from None
+    if not line.endswith(b"\n"):
+        raise Fault("unavailable")
+    return line
+
+
+def _result(line: bytes) -> Any:
+    reply = json.loads(line)
+    if not reply["ok"]:
+        raise Fault(reply["error"])
+    return reply["result"]

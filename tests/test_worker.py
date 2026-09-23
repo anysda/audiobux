@@ -1,3 +1,4 @@
+import asyncio
 import json
 import queue
 import shutil
@@ -139,6 +140,41 @@ def raw(path: Path, data: bytes, half_close: bool = True) -> bytes:
 
 
 # the flow
+
+
+def test_book_goes_from_incoming_to_the_library(tmp_path, sock, chekhov_epub):
+    # round the clock: an empty setting means no quiet hours, 3 at night included
+    clock = Clock(datetime(2026, 11, 3, 3, 0, tzinfo=MSK))
+    tts = LazyTts(clock)
+    w = make(tmp_path, tts, clock=clock, sock=sock)
+    server = w.serve()
+    try:
+        upload_id = upload(w, chekhov_epub)
+        answer = contract.call(w.settings.worker_socket, "book.submit", upload_id=upload_id, title="")
+        assert answer["known"] is False and contract.ID.fullmatch(answer["id"])
+        book_id = answer["id"]
+        assert not (w.settings.incoming / upload_id).exists(), "the upload is taken out of incoming/"
+        assert contract.call(w.settings.worker_socket, "book.get", id=book_id)["state"] == "queued"
+
+        w.run(until_idle=True)
+
+        folder = w.settings.library / book_id
+        assert (folder / "book.m4b").stat().st_size > 0
+        assert (folder / "book.epub").read_bytes() == chekhov_epub.read_bytes()
+        assert (folder / "source.epub").read_bytes() == chekhov_epub.read_bytes()
+        assert not (w.settings.work / book_id).exists(), "work in progress goes once the book is in the library"
+        assert tts.times[0] == datetime(2026, 11, 3, 3, 0, tzinfo=MSK)
+
+        got = contract.call(w.settings.worker_socket, "book.get", id=book_id)
+        assert (got["state"], got["step"], got["percent"], got["error"]) == ("done", None, 100, None)
+        assert (got["title"], got["author"], got["has_epub"]) == ("Рассказы", "Антон Чехов", True)
+        assert got["pieces_done"] == got["pieces_total"] == tts.calls
+        assert got["duration"] > 0 and len(got["chapters"]) > 1 and got["chapters"][0]["start"] == 0
+        listed = contract.call(w.settings.worker_socket, "library.list")
+        assert [b["id"] for b in listed] == [book_id] and "chapters" not in listed[0]
+    finally:
+        server.shutdown()
+        server.server_close()
 
 
 def test_the_same_file_again_is_the_same_book(tmp_path, chekhov_epub):
@@ -459,6 +495,60 @@ def test_a_silent_caller_is_cut_off(served, monkeypatch):
     assert raw(served.settings.worker_socket, b'{"method": ', half_close=False) == contract.refusal("timeout")
 
 
+def test_submit_tells_the_format_by_the_content(served):
+    path = served.settings.worker_socket
+    text = upload(served, "Это просто текст, а не PDF.\n".encode() * 100)
+    with pytest.raises(Fault) as refused:
+        contract.call(path, "book.submit", upload_id=text, title="")
+    assert refused.value.error == "not-a-book"
+    assert not (served.settings.incoming / text).exists(), "a refused upload is dropped"
+    assert not list(served.settings.work.iterdir()) and served.library.books() == []
+
+
+def test_submit_takes_only_a_plain_file_in_incoming(served, tmp_path):
+    path, incoming = served.settings.worker_socket, served.settings.incoming
+    secret = tmp_path / "secret.epub"
+    secret.write_bytes(b"PK\x03\x04 private")
+    linked, folder, missing = uuid.uuid4().hex, uuid.uuid4().hex, uuid.uuid4().hex
+    (incoming / linked).symlink_to(secret)
+    (incoming / folder).mkdir()
+    for upload_id in (linked, folder, missing):
+        with pytest.raises(Fault) as refused:
+            contract.call(path, "book.submit", upload_id=upload_id, title="")
+        assert refused.value.error == "not-found"
+    assert secret.exists() and served.library.books() == []
+
+
+def test_status_and_events(served, chekhov_epub):
+    path = served.settings.worker_socket
+    status = contract.call(path, "status.read")
+    assert status["queue"] == 0 and status["models"]["ready"] is True
+    assert status["quiet"] == {"window": None, "tz": "Europe/Moscow", "active": False}
+    kinds = {f["name"]: f["extensions"] for f in status["formats"]}
+    assert ".epub" in kinds["epub"] and ".pdf" in kinds["pdf"] and ".djvu" in kinds["djvu"]
+    assert status["card"] is None or set(status["card"]) == {"name", "memory_used", "memory_total", "load"}
+
+    async def follow():
+        events = await contract.subscribe(path)
+        book_id = contract.call(path, "book.submit", upload_id=upload(served, chekhov_epub), title="")["id"]
+        first = await anext(events)
+        assert first["type"] == "book" and first["book"]["id"] == book_id and first["book"]["state"] == "queued"
+        assert contract.call(path, "status.read")["queue"] == 1
+        contract.call(path, "book.delete", id=book_id)
+        assert await anext(events) == {"type": "deleted", "id": book_id}
+        await events.aclose()
+
+    asyncio.run(follow())
+
+
+def test_the_title_is_cleaned_by_the_socket(served, chekhov_epub):
+    """Control characters and slashes go, whoever sent them: a title is never a path."""
+    path = served.settings.worker_socket
+    sent = " ../x\\y\n\x00\u202eКнига\t "
+    book_id = contract.call(path, "book.submit", upload_id=upload(served, chekhov_epub), title=sent)["id"]
+    assert contract.call(path, "book.get", id=book_id)["title"] == "..xyКнига"
+
+
 def fake_worker(path: Path, *lines: bytes, hold: float = 0.0) -> threading.Thread:
     """One connection answered with `lines`, kept open `hold` seconds, then closed."""
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -479,6 +569,29 @@ def fake_worker(path: Path, *lines: bytes, hold: float = 0.0) -> threading.Threa
 async def read_all(path: Path) -> list:
     events = await contract.subscribe(path)
     return [e async for e in events]
+
+
+def test_events_end_when_the_worker_goes(sock):
+    deleted = contract.notice(contract.Event(type="deleted", id="ab"))
+    fake_worker(sock, contract.answer({}), deleted)
+    assert asyncio.run(asyncio.wait_for(read_all(sock), 10)) == [{"type": "deleted", "id": "ab"}]
+
+
+def test_events_end_when_the_worker_falls_silent(sock, monkeypatch):
+    """Not even a ping for three of their periods: the worker hangs, the reader is let go."""
+    monkeypatch.setattr(contract, "PING_EVERY", 0.05)
+    thread = fake_worker(sock, contract.answer({}), hold=2)
+    assert asyncio.run(asyncio.wait_for(read_all(sock), 1)) == []
+    thread.join()
+
+
+def test_an_absent_worker_is_unavailable(tmp_path, sock):
+    with pytest.raises(Fault) as refused:
+        contract.call(sock, "status.read")
+    assert refused.value.error == "unavailable"
+    with pytest.raises(Fault) as refused:
+        asyncio.run(contract.subscribe(sock))
+    assert refused.value.error == "unavailable"
 
 
 def test_the_queue_waits_for_the_models(tmp_path, chekhov_epub, monkeypatch):
@@ -537,3 +650,28 @@ def test_error_text_never_carries_the_exception():
 def test_events_are_json_lines():
     line = contract.notice(contract.Event(type="deleted", id="ab"))
     assert line.endswith(b"\n") and json.loads(line) == {"type": "deleted", "id": "ab"}
+
+
+def test_a_stale_socket_is_replaced(tmp_path, sock):
+    sock.write_text("left from a crash")
+    w = make(tmp_path, sock=sock)
+    server = w.serve()
+    try:
+        assert sock.stat().st_mode & 0o777 == 0o600
+        assert contract.call(sock, "library.list") == []
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_two_callers_at_once(served):
+    results = []
+    threads = [
+        threading.Thread(target=lambda: results.append(contract.call(served.settings.worker_socket, "library.list")))
+        for _ in range(8)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert results == [[]] * 8

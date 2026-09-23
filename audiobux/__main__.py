@@ -1,4 +1,5 @@
 import argparse
+import json
 import logging
 import shutil
 import signal
@@ -17,6 +18,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(prog="audiobux")
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("worker", help="voice the queue and answer the web process on the socket")
+    web = sub.add_parser("web", help="the web interface and its API")
+    web.add_argument("--host", default="0.0.0.0")
+    web.add_argument("--port", type=int, default=8080)
+    sub.add_parser("openapi", help="print the API description (docs/openapi.json)")
     one = sub.add_parser("book", help="voice a single local file, without the queue")
     one.add_argument("file", type=Path)
     one.add_argument("--until")
@@ -24,7 +29,18 @@ def main() -> None:
     args = parser.parse_args()
     settings = Settings.from_env()
 
-    if args.cmd == "worker":
+    # each process imports only its own side: the web one has no pipeline to import
+    if args.cmd == "web":
+        import uvicorn
+
+        from . import web as app
+
+        uvicorn.run(app.create(settings), host=args.host, port=args.port, proxy_headers=False)
+    elif args.cmd == "openapi":
+        from . import web as app
+
+        print(json.dumps(app.create(settings).openapi(), ensure_ascii=False, indent=2))
+    elif args.cmd == "worker":
         from . import worker
 
         # docker stop sends SIGTERM; exiting normally lets the models close.
