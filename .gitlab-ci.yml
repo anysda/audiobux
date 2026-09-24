@@ -10,6 +10,20 @@ variables:
   PIP_CACHE_DIR: $CI_PROJECT_DIR/.cache/pip
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
 
+frontend:
+  stage: lint
+  image: node:22.22.3-slim
+  cache:
+    key: npm
+    paths: [.cache/npm]
+  variables:
+    npm_config_cache: $CI_PROJECT_DIR/.cache/npm
+  script:
+    - npm --prefix frontend ci --no-audit --no-fund
+    - npm --prefix frontend run check
+    - npm --prefix frontend run lint
+    - npm --prefix frontend run build
+
 ruff:
   stage: lint
   script:
