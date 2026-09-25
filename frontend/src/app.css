@@ -1,3 +1,22 @@
+@font-face {
+  font-family: 'Roboto Flex';
+  src: url('./fonts/RobotoFlex.woff2') format('woff2');
+  font-weight: 400 700;
+  font-stretch: 25% 100%;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  src: url('./fonts/IBMPlexMono-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  src: url('./fonts/IBMPlexMono-Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-display: swap;
+}
 
 /* One look everywhere, taken from the player: dusty-blue field, blurred listener silhouette, white condensed caps, white pills */
 :root {
