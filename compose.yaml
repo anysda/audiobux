@@ -1,0 +1,107 @@
+# One image, two processes. The worker voices the queue on the video card and holds
+# everything under the data folder; the web process only takes uploads into
+# incoming/, reads the library, keeps where the listener is in web/ and asks the
+# worker on its socket in run/.
+# The data folder on the host is AUDIOBUX_DATA (./data by default); both
+# processes run as AUDIOBUX_UID:AUDIOBUX_GID, the owner of that folder. The web
+# answers on AUDIOBUX_PORT (8080).
+x-hardened: &hardened
+  restart: unless-stopped
+  user: "${AUDIOBUX_UID:-1000}:${AUDIOBUX_GID:-1000}"
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  logging:
+    driver: json-file
+    options:
+      max-size: 20m
+      max-file: "5"
+
+services:
+  worker:
+    <<: *hardened
+    build: .
+    image: audiobux:latest
+    container_name: audiobux-worker
+    command: ["audiobux", "worker"]
+    environment:
+      AUDIOBUX_DATA: /data
+      AUDIOBUX_TTS: f5
+      AUDIOBUX_QUIET_HOURS: ${AUDIOBUX_QUIET_HOURS:-00:00-08:00}
+      AUDIOBUX_TZ: ${AUDIOBUX_TZ:-Europe/Moscow}
+      AUDIOBUX_COVER_URL: http://cover:8080
+    # models are downloaded when the worker starts; covers are asked of the cover service
+    networks: [default, cover_in]
+    volumes:
+      - ${AUDIOBUX_DATA:-./data}:/data
+    healthcheck:
+      test: ["CMD", "test", "-S", "/data/run/worker.sock"]
+      interval: 10s
+      start_period: 30s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  web:
+    <<: *hardened
+    image: audiobux:latest
+    container_name: audiobux-web
+    command: ["audiobux", "web", "--port", "8080"]
+    environment:
+      AUDIOBUX_DATA: /data
+      # names the service is opened by besides its IP addresses, comma-separated
+      AUDIOBUX_HOSTS: ${AUDIOBUX_HOSTS:-}
+      AUDIOBUX_UPLOAD_MB: ${AUDIOBUX_UPLOAD_MB:-1024}
+    # the worker makes the folders and the socket first
+    depends_on:
+      worker:
+        condition: service_healthy
+    ports: ["${AUDIOBUX_PORT:-8080}:8080"]
+    networks: [web]
+    read_only: true
+    tmpfs: [/tmp]
+    mem_limit: 512m
+    pids_limit: 64
+    volumes:
+      - ${AUDIOBUX_DATA:-./data}/incoming:/data/incoming
+      - ${AUDIOBUX_DATA:-./data}/library:/data/library:ro
+      - ${AUDIOBUX_DATA:-./data}/run:/data/run
+      - ${AUDIOBUX_DATA:-./data}/web:/data/web
+
+  # Cover search on the web, isolated: author and title in, image bytes out.
+  # No secrets, no volumes, no GPU; outside network only. The finder goes only to the
+  # hosts on its list, and its bridge has a fixed name, br-cover-out, so that a firewall
+  # on the host can drop it to private ranges and to the host as well.
+  cover:
+    build: coverfinder
+    image: audiobux-cover:latest
+    container_name: audiobux-cover
+    restart: unless-stopped
+    networks: [cover_in, cover_out]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    user: "65534:65534"
+    mem_limit: 128m
+    cpus: 0.5
+    pids_limit: 32
+    logging:
+      driver: json-file
+      options:
+        max-size: 1m
+        max-file: "2"
+
+networks:
+  default: {}
+  # the web process answers on its port and goes nowhere itself
+  web:
+    driver_opts:
+      com.docker.network.bridge.enable_ip_masquerade: "false"
+  cover_in:
+    internal: true
+  cover_out:
+    driver_opts:
+      com.docker.network.bridge.name: br-cover-out
