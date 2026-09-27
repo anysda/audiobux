@@ -4,7 +4,7 @@
 # worker on its socket in run/.
 # The data folder on the host is AUDIOBUX_DATA (./data by default); both
 # processes run as AUDIOBUX_UID:AUDIOBUX_GID, the owner of that folder. The web
-# answers on AUDIOBUX_PORT (8080).
+# answers on AUDIOBUX_PORT (8080). install.sh puts them all into .env.
 x-hardened: &hardened
   restart: unless-stopped
   user: "${AUDIOBUX_UID:-1000}:${AUDIOBUX_GID:-1000}"
