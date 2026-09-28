@@ -26,7 +26,7 @@ services:
     environment:
       AUDIOBUX_DATA: /data
       AUDIOBUX_TTS: f5
-      AUDIOBUX_QUIET_HOURS: ${AUDIOBUX_QUIET_HOURS:-00:00-08:00}
+      AUDIOBUX_QUIET_HOURS: ${AUDIOBUX_QUIET_HOURS:-}
       AUDIOBUX_TZ: ${AUDIOBUX_TZ:-Europe/Moscow}
       AUDIOBUX_COVER_URL: http://cover:8080
     # models are downloaded when the worker starts; covers are asked of the cover service
