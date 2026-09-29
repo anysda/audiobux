@@ -12,6 +12,7 @@ from test_worker import CountingTts, make, submit
 from audiobux import contract, web
 from audiobux.config import Settings
 
+OPENAPI = Path(__file__).parent.parent / "docs" / "openapi.json"
 NO_SUCH = "0123456789abcdef0123456789abcdef"
 HOST = "10.1.2.3:8080"
 ORIGIN = f"http://{HOST}"
@@ -57,6 +58,12 @@ def finished(worker, source: Path, title: str = "Рассказы", **files: byt
 
 def incoming(worker) -> list[Path]:
     return list(worker.settings.incoming.iterdir())
+
+
+def test_openapi_json_is_the_app():
+    """docs/openapi.json is written by `audiobux openapi > docs/openapi.json`."""
+    app = web.create(Settings())
+    assert json.loads(OPENAPI.read_text()) == app.openapi()
 
 
 # uploads

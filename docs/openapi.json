@@ -1,0 +1,1516 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "audiobux",
+    "description": "A book file in, an audiobook with chapters and its text out. A request for another host, or a POST, PUT or DELETE without the service's own Origin, is refused with 403.",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/api/books": {
+      "post": {
+        "summary": "Upload a book file",
+        "description": "The file goes to `incoming/` under a fresh id and only there; it is gone again\nwhen it is too large, not a book, cut off, or the worker does not take it.",
+        "operationId": "upload_api_books_post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 1024,
+              "description": "the file's name: the title, if the book has none",
+              "default": "",
+              "title": "Name"
+            },
+            "description": "the file's name: the title, if the book has none"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Submitted"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "the same file was there already: that book, `known` true"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "description": "the file itself, sent as it is; its format is told by its content",
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "All books, the queue included",
+        "operationId": "books_api_books_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Book"
+                  },
+                  "title": "Response Books Api Books Get"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/books/{book_id}": {
+      "get": {
+        "summary": "A book with its chapters",
+        "operationId": "book_api_books__book_id__get",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$",
+              "description": "the book's id, 32 hex digits",
+              "title": "Book Id"
+            },
+            "description": "the book's id, 32 hex digits"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a book",
+        "description": "A book being voiced stops; its files go, and where the listener was in it.",
+        "operationId": "delete_api_books__book_id__delete",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$",
+              "description": "the book's id, 32 hex digits",
+              "title": "Book Id"
+            },
+            "description": "the book's id, 32 hex digits"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/books/{book_id}/retry": {
+      "post": {
+        "summary": "Try a failed book again, from the step it failed at",
+        "operationId": "retry_api_books__book_id__retry_post",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$",
+              "description": "the book's id, 32 hex digits",
+              "title": "Book Id"
+            },
+            "description": "the book's id, 32 hex digits"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Book"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/books/{book_id}/cover": {
+      "get": {
+        "summary": "The cover; 404 when the book has none",
+        "operationId": "cover_api_books__book_id__cover_get",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$",
+              "description": "the book's id, 32 hex digits",
+              "title": "Book Id"
+            },
+            "description": "the book's id, 32 hex digits"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "the file",
+            "content": {
+              "image/jpeg": {}
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/books/{book_id}/audio": {
+      "get": {
+        "summary": "The audiobook to play, with Range",
+        "operationId": "audio_api_books__book_id__audio_get",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$",
+              "description": "the book's id, 32 hex digits",
+              "title": "Book Id"
+            },
+            "description": "the book's id, 32 hex digits"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "the file",
+            "content": {
+              "audio/mp4": {}
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "206": {
+            "description": "the asked range"
+          },
+          "416": {
+            "description": "the range starts past the end"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/books/{book_id}/m4b": {
+      "get": {
+        "summary": "Download the m4b, named by the title",
+        "operationId": "m4b_api_books__book_id__m4b_get",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$",
+              "description": "the book's id, 32 hex digits",
+              "title": "Book Id"
+            },
+            "description": "the book's id, 32 hex digits"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "the file",
+            "content": {
+              "audio/mp4": {}
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/books/{book_id}/epub": {
+      "get": {
+        "summary": "Download the EPUB, named by the title",
+        "operationId": "epub_api_books__book_id__epub_get",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$",
+              "description": "the book's id, 32 hex digits",
+              "title": "Book Id"
+            },
+            "description": "the book's id, 32 hex digits"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "the file",
+            "content": {
+              "application/epub+zip": {}
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/books/{book_id}/sync": {
+      "get": {
+        "summary": "The text of the book with the times it is heard at (sync.json, version 1)",
+        "description": "Given as the worker wrote it: chapters of `h`, `p`, `code` and `figure` blocks;\na figure's `src` is `figures/<name>.jpg`, under this book's `figures` route.",
+        "operationId": "sync_api_books__book_id__sync_get",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$",
+              "description": "the book's id, 32 hex digits",
+              "title": "Book Id"
+            },
+            "description": "the book's id, 32 hex digits"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "the file",
+            "content": {
+              "application/json": {}
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/books/{book_id}/figures/{name}": {
+      "get": {
+        "summary": "A figure of the book's text",
+        "operationId": "figure_api_books__book_id__figures__name__get",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$",
+              "description": "the book's id, 32 hex digits",
+              "title": "Book Id"
+            },
+            "description": "the book's id, 32 hex digits"
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "`[0-9a-z_-]{1,64}.jpg`",
+              "title": "Name"
+            },
+            "description": "`[0-9a-z_-]{1,64}.jpg`"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "the file",
+            "content": {
+              "image/jpeg": {}
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/listening": {
+      "get": {
+        "summary": "Where the listener is in every book listened to",
+        "operationId": "listening_api_listening_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Place"
+                  },
+                  "type": "array",
+                  "title": "Response Listening Api Listening Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/books/{book_id}/position": {
+      "get": {
+        "summary": "Where the listener is",
+        "operationId": "position_api_books__book_id__position_get",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$",
+              "description": "the book's id, 32 hex digits",
+              "title": "Book Id"
+            },
+            "description": "the book's id, 32 hex digits"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Place"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Remember where the listener is",
+        "operationId": "move_api_books__book_id__position_put",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$",
+              "description": "the book's id, 32 hex digits",
+              "title": "Book Id"
+            },
+            "description": "the book's id, 32 hex digits"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Position"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Place"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/books/{book_id}/listened": {
+      "put": {
+        "summary": "Mark the book listened",
+        "operationId": "listened_api_books__book_id__listened_put",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$",
+              "description": "the book's id, 32 hex digits",
+              "title": "Book Id"
+            },
+            "description": "the book's id, 32 hex digits"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Place"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Mark the book not listened",
+        "operationId": "unlistened_api_books__book_id__listened_delete",
+        "parameters": [
+          {
+            "name": "book_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$",
+              "description": "the book's id, 32 hex digits",
+              "title": "Book Id"
+            },
+            "description": "the book's id, 32 hex digits"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Place"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/status": {
+      "get": {
+        "summary": "Models, the card, the queue, quiet hours and the formats taken",
+        "operationId": "status_api_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Status"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/events": {
+      "get": {
+        "summary": "Live progress of the books",
+        "operationId": "events_api_events_get",
+        "responses": {
+          "200": {
+            "description": "Server-sent events of the worker: `event: book` with `data` an object\n`{\"type\": \"book\", \"book\": Book}` when a book is added, moves on or changes state;\n`event: deleted` with `{\"type\": \"deleted\", \"id\": \"<id>\"}`; and a `: ping` comment\nevery 15 s while nothing happens.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Book": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "author": {
+            "type": "string",
+            "title": "Author"
+          },
+          "format": {
+            "type": "string",
+            "title": "Format"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "paused",
+              "done",
+              "failed"
+            ],
+            "title": "State"
+          },
+          "step": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step"
+          },
+          "pieces_done": {
+            "type": "integer",
+            "title": "Pieces Done"
+          },
+          "pieces_total": {
+            "type": "integer",
+            "title": "Pieces Total"
+          },
+          "percent": {
+            "type": "integer",
+            "title": "Percent"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "added": {
+            "type": "number",
+            "title": "Added"
+          },
+          "updated": {
+            "type": "number",
+            "title": "Updated"
+          },
+          "duration": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration"
+          },
+          "has_epub": {
+            "type": "boolean",
+            "title": "Has Epub"
+          },
+          "has_cover": {
+            "type": "boolean",
+            "title": "Has Cover"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "author",
+          "format",
+          "state",
+          "step",
+          "pieces_done",
+          "pieces_total",
+          "percent",
+          "error",
+          "added",
+          "updated",
+          "duration",
+          "has_epub",
+          "has_cover"
+        ],
+        "title": "Book"
+      },
+      "BookDetails": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "author": {
+            "type": "string",
+            "title": "Author"
+          },
+          "format": {
+            "type": "string",
+            "title": "Format"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "paused",
+              "done",
+              "failed"
+            ],
+            "title": "State"
+          },
+          "step": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step"
+          },
+          "pieces_done": {
+            "type": "integer",
+            "title": "Pieces Done"
+          },
+          "pieces_total": {
+            "type": "integer",
+            "title": "Pieces Total"
+          },
+          "percent": {
+            "type": "integer",
+            "title": "Percent"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "added": {
+            "type": "number",
+            "title": "Added"
+          },
+          "updated": {
+            "type": "number",
+            "title": "Updated"
+          },
+          "duration": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration"
+          },
+          "has_epub": {
+            "type": "boolean",
+            "title": "Has Epub"
+          },
+          "has_cover": {
+            "type": "boolean",
+            "title": "Has Cover"
+          },
+          "chapters": {
+            "items": {
+              "$ref": "#/components/schemas/Chapter"
+            },
+            "type": "array",
+            "title": "Chapters"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "author",
+          "format",
+          "state",
+          "step",
+          "pieces_done",
+          "pieces_total",
+          "percent",
+          "error",
+          "added",
+          "updated",
+          "duration",
+          "has_epub",
+          "has_cover",
+          "chapters"
+        ],
+        "title": "BookDetails"
+      },
+      "Card": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "memory_used": {
+            "type": "integer",
+            "title": "Memory Used"
+          },
+          "memory_total": {
+            "type": "integer",
+            "title": "Memory Total"
+          },
+          "load": {
+            "type": "integer",
+            "title": "Load"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "memory_used",
+          "memory_total",
+          "load"
+        ],
+        "title": "Card"
+      },
+      "Chapter": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "start": {
+            "type": "number",
+            "title": "Start"
+          }
+        },
+        "type": "object",
+        "required": [
+          "title",
+          "start"
+        ],
+        "title": "Chapter"
+      },
+      "Format": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "extensions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Extensions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "extensions"
+        ],
+        "title": "Format"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "Models": {
+        "properties": {
+          "ready": {
+            "type": "boolean",
+            "title": "Ready"
+          },
+          "done": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Done"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ready",
+          "done",
+          "total"
+        ],
+        "title": "Models"
+      },
+      "Place": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "position": {
+            "type": "number",
+            "title": "Position"
+          },
+          "listened": {
+            "type": "boolean",
+            "title": "Listened"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "position",
+          "listened"
+        ],
+        "title": "Place"
+      },
+      "Position": {
+        "properties": {
+          "seconds": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Seconds",
+            "description": "seconds from the start of the m4b"
+          }
+        },
+        "type": "object",
+        "required": [
+          "seconds"
+        ],
+        "title": "Position"
+      },
+      "Problem": {
+        "properties": {
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "error code: bad-request, conflict, forbidden, not-a-book, not-found, too-large, unavailable"
+          }
+        },
+        "type": "object",
+        "required": [
+          "detail"
+        ],
+        "title": "Problem"
+      },
+      "Quiet": {
+        "properties": {
+          "window": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window"
+          },
+          "tz": {
+            "type": "string",
+            "title": "Tz"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          }
+        },
+        "type": "object",
+        "required": [
+          "window",
+          "tz",
+          "active"
+        ],
+        "title": "Quiet"
+      },
+      "Status": {
+        "properties": {
+          "models": {
+            "$ref": "#/components/schemas/Models"
+          },
+          "card": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Card"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "queue": {
+            "type": "integer",
+            "title": "Queue"
+          },
+          "quiet": {
+            "$ref": "#/components/schemas/Quiet"
+          },
+          "formats": {
+            "items": {
+              "$ref": "#/components/schemas/Format"
+            },
+            "type": "array",
+            "title": "Formats"
+          }
+        },
+        "type": "object",
+        "required": [
+          "models",
+          "card",
+          "queue",
+          "quiet",
+          "formats"
+        ],
+        "title": "Status"
+      },
+      "Submitted": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "known": {
+            "type": "boolean",
+            "title": "Known"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "known"
+        ],
+        "title": "Submitted"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}
