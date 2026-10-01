@@ -6,6 +6,8 @@ import string
 import unicodedata
 from itertools import pairwise
 
+from rapidfuzz import fuzz
+
 from ..text import CAPTION, ENDINGS, MARK, code_lines, looks_like_code
 from .document import Chapter
 
@@ -116,7 +118,7 @@ def strip_running(pages: list[list[str]]) -> list[list[str]]:
 
 def _join_lines(block: str) -> str:
     """A block's lines into one paragraph; code keeps its lines."""
-    text = block.replace("\xad", "")
+    text = re.sub(r"\xad\s*\n\s*", "", block).replace("\xad", "")  # a soft hyphen at the end of a line joins the word
     text = re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", " ", text)
     text = re.sub(r"(\w)-\s*\n\s*(?=[a-zа-яё])", r"\1", text)
     return code_lines(text) if looks_like_code(text) else spaces(text)
@@ -127,8 +129,11 @@ def _continues(prev: str, text: str) -> bool:
 
 
 def _matches(text: str, title: str) -> bool:
+    """The text opens with the title; a letter or two may differ (OCR)."""
     want, got = _squash(title), _squash(text[:200])
-    return len(got) >= 4 and (got.startswith(want[:40]) or want.startswith(got))
+    if len(got) < 4:
+        return False
+    return got.startswith(want[:40]) or want.startswith(got) or fuzz.ratio(want[:40], got[: len(want[:40])]) >= 85
 
 
 def _find_heading(paragraphs: list[tuple[int, str]], title: str, page: int) -> int:
