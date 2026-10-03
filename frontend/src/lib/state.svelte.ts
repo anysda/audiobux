@@ -117,8 +117,8 @@ class Library {
     if (!this.ready || !this.status) this.#poll = setTimeout(() => void this.loadStatus(), 5000);
   }
 
-  async loadDetails(id: string) {
-    if (this.details[id]) return;
+  async loadDetails(id: string, again = false) {
+    if (this.details[id] && !again) return;
     try {
       this.details[id] = await api.book(id);
     } catch {
@@ -137,9 +137,11 @@ class Library {
 
   #upsert(b: Book) {
     const i = this.books.findIndex((x) => x.id === b.id);
+    const was = this.books[i];
     if (i < 0) this.books.unshift(b);
     else this.books[i] = b;
-    if (b.state === 'done') delete this.details[b.id];
+    // the chapters grow with the book's steps: the ones on screen are asked for again as it moves on
+    if (this.details[b.id] && (was?.step !== b.step || was?.state !== b.state)) void this.loadDetails(b.id, true);
   }
 
   #drop(id: string) {
@@ -176,15 +178,15 @@ class Library {
     return this.books.filter((b) => this.sel.includes(b.id));
   }
 
-  download() {
-    const ok = this.picked.filter((b) => b.state === 'done');
+  download(kind: 'm4b' | 'epub') {
+    const ok = this.picked.filter((b) => b.state === 'done' && (kind === 'm4b' || b.has_epub));
     for (const b of ok) {
       const a = document.createElement('a');
-      a.href = url.m4b(b.id);
+      a.href = url[kind](b.id);
       a.download = '';
       a.click();
     }
-    this.say(`Скачивание m4b: ${ok.length}`);
+    this.say(`Скачивание ${kind === 'm4b' ? 'm4b' : 'EPUB'}: ${ok.length}`);
     this.clear();
   }
 

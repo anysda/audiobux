@@ -71,17 +71,29 @@ class Fault(Exception):
         self.error: Error = error
 
 
+# the steps of a book in the order they run; `publish` moves the finished book into the library
+Step = Literal[
+    "extract", "ocr", "figures", "fix", "epub", "normalize", "chunk", "tts", "verify", "assemble", "sync", "publish"
+]
+
+
 class Book(TypedDict):
+    """`percent` is the whole of the work, every step weighed by what it takes for a book
+    of this size: it never goes back and stays at 99 at most until the book is done.
+    `eta` is the seconds left at the speed this book has gone so far, null until the
+    text is read; it stands still while the book is paused for quiet hours."""
+
     id: str
     title: str
     author: str
     format: str
     state: State
     # the pipeline step running or failed, null when there is none
-    step: str | None
+    step: Step | None
     pieces_done: int
     pieces_total: int
     percent: int
+    eta: int | None
     # what went wrong, for the listener; never a path or a trace
     error: str | None
     added: float
@@ -94,7 +106,8 @@ class Book(TypedDict):
 
 class Chapter(TypedDict):
     title: str
-    start: float
+    # seconds into the m4b, null while the book is being made
+    start: float | None
 
 
 class BookDetails(Book):

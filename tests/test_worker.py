@@ -1,10 +1,13 @@
 import asyncio
+import itertools
 import json
 import queue
 import shutil
 import socket
+import sqlite3
 import threading
 import time
+import typing
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -12,7 +15,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from audiobux import contract, fetch, models, pipeline, worker
+from audiobux import contract, fetch, library, models, pipeline, worker
 from audiobux.book import Book
 from audiobux.config import Settings
 from audiobux.contract import Fault
@@ -675,3 +678,215 @@ def test_two_callers_at_once(served):
     for t in threads:
         t.join()
     assert results == [[]] * 8
+
+
+# progress
+
+# the steps of a 132-page book of 256 639 characters as they went on the card, seconds
+ALTOV = {
+    "extract": 21,
+    "ocr": 0,
+    "figures": 0,
+    "fix": 731,
+    "epub": 0,
+    "normalize": 1471,
+    "chunk": 0,
+    "tts": 5740,
+    "verify": 1928,
+    "assemble": 915,
+    "sync": 3,
+}
+ALTOV_PIECES = 1400
+
+
+def standing_in(w, clock, slower=1.0, pieces=ALTOV_PIECES, chars=256639, seconds=ALTOV):
+    """The steps of the pipeline with their outputs made up and their time taken off
+    `clock`, ten seconds at a time, a checkpoint between; takes are heard, as on the card."""
+    w.ctx.models.listener = object()
+
+    def step(name):
+        def run(book, ctx):
+            if name == "extract":
+                half = "а" * (chars // 2)
+                book.write(
+                    "text.json",
+                    {
+                        "title": "Альтов",
+                        "author": "Г. Альтов",
+                        "chapters": [
+                            {"title": "Первая", "paragraphs": [half]},
+                            {"title": "Вторая", "paragraphs": [half]},
+                        ],
+                    },
+                )
+                book.path("cover.jpg").write_bytes(b"\xff\xd8cover")
+            if name == "chunk":
+                book.write("chunks.json", [{"text": "кусок"}] * pieces)
+            folder = {"tts": "tts", "verify": "ready"}.get(name)
+            if folder:
+                book.path(folder).mkdir(exist_ok=True)
+            ticks = max(1, round(seconds[name] * slower / 10))
+            for k in range(ticks):
+                ctx.quiet.wait()
+                clock.now += timedelta(seconds=seconds[name] * slower / ticks)
+                for i in range(pieces * k // ticks, pieces * (k + 1) // ticks) if folder else ():
+                    book.path(f"{folder}/{i:05}.wav").touch()
+                    if folder == "ready":
+                        book.path(f"tts/{i:05}.s1.wav").touch()
+            if name == "assemble":
+                book.write("chapters.json", {"duration": 20940.0, "chapters": [{"title": "Первая", "start": 0.0}]})
+                book.path("book.m4b").write_bytes(b"m4b")
+
+        return pipeline.Step(name, run)
+
+    return [step(s.name) for s in pipeline.STEPS]
+
+
+def watched(w, clock):
+    """(seconds since the start, the book) at every event the worker sends."""
+    seen, start, emit = [], clock.now, w._emit
+    w.clock = lambda: clock.now.timestamp()
+
+    def record(event):
+        if event["type"] == "book":
+            seen.append(((clock.now - start).total_seconds(), event["book"]))
+        emit(event)
+
+    w._emit = record
+    return seen
+
+
+def test_progress_of_a_whole_book(tmp_path, chekhov_epub, monkeypatch):
+    clock = Clock(datetime(2026, 11, 3, 9, 0, tzinfo=MSK))
+    w = make(tmp_path, quiet=QuietHours(""), clock=clock)
+    monkeypatch.setattr(pipeline, "STEPS", standing_in(w, clock))
+    submit(w, chekhov_epub)
+    seen = watched(w, clock)
+
+    w.run(until_idle=True)
+
+    running = [b for _, b in seen if b["state"] == "running"]
+    percents = [b["percent"] for b in running]
+    assert percents == sorted(percents) and max(percents) == 99, "never back, 100 only when done"
+    assert seen[-1][1]["state"] == "done" and (seen[-1][1]["percent"], seen[-1][1]["eta"]) == (100, 0)
+    fixing = [b["percent"] for b in running if b["step"] == "fix"]
+    assert fixing[-1] >= 6 and all(b["percent"] >= fixing[-1] for b in running if b["step"] == "normalize")
+    assert len(set(fixing)) > 5, "on before there are pieces to count"
+    assert len({b["percent"] for b in running if b["step"] == "tts"}) > 40, "the voicing goes on smoothly"
+    etas = [b["eta"] for b in running]
+    first = next(i for i, e in enumerate(etas) if e is not None)
+    assert first > 0 and running[first - 1]["step"] == "extract", "no estimate until the text is read"
+    assert all(e is not None for e in etas[first:])
+    assert abs(etas[first] - sum(ALTOV.values()) + ALTOV["extract"]) < 600, "the book's time, near enough"
+    assert all(a + 1 >= b for a, b in itertools.pairwise(etas[first:])), "at this speed only down"
+    same = [
+        (b - a) for (a, x), (b, y) in itertools.pairwise(seen) if (x["step"], x["state"]) == (y["step"], y["state"])
+    ]
+    assert min(same) >= 5 and max(same) <= 15, "within a step, every 5 to 15 s"
+
+
+def test_eta_follows_a_slower_card(tmp_path, chekhov_epub, monkeypatch):
+    clock = Clock(datetime(2026, 11, 3, 9, 0, tzinfo=MSK))
+    w = make(tmp_path, quiet=QuietHours(""), clock=clock)
+    monkeypatch.setattr(pipeline, "STEPS", standing_in(w, clock, slower=2))
+    submit(w, chekhov_epub)
+    seen = watched(w, clock)
+
+    w.run(until_idle=True)
+
+    total = 2 * sum(ALTOV.values())
+    for t, book in seen:
+        if book["state"] == "running" and t > total / 3:
+            assert abs(book["eta"] - (total - t)) < 0.25 * (total - t) + 120, (t, book["eta"])
+
+
+def test_eta_stands_still_in_quiet_hours(tmp_path, chekhov_epub, monkeypatch):
+    clock = Clock(datetime(2026, 11, 3, 0, 0, tzinfo=MSK))
+    w = make(tmp_path, quiet=QuietHours("01:00-08:00"), clock=clock)
+    monkeypatch.setattr(pipeline, "STEPS", standing_in(w, clock))
+    book_id = submit(w, chekhov_epub)
+    clock.now = datetime(2026, 11, 2, 23, 0, tzinfo=MSK)
+    seen = watched(w, clock)
+
+    w.run(until_idle=True)
+
+    paused = [b for _, b in seen if b["state"] == "paused"]
+    assert paused and paused[0]["step"] == "tts"
+    assert {(b["percent"], b["eta"]) for b in paused} == {(paused[0]["percent"], paused[0]["eta"])}
+    last = max(i for i, (_, b) in enumerate(seen) if b["state"] == "paused")
+    after = next(b for _, b in seen[last:] if b["state"] == "running")
+    assert abs(after["eta"] - paused[0]["eta"]) <= 15, "seven hours of pause are not seven hours of work"
+    assert state(w, book_id)["state"] == "done" and state(w, book_id)["worked"] < sum(ALTOV.values()) + 1
+
+
+def test_the_cover_and_the_chapters_are_there_before_the_book_is(tmp_path, chekhov_epub, monkeypatch):
+    clock = Clock(datetime(2026, 11, 3, 9, 0, tzinfo=MSK))
+    w = make(tmp_path, quiet=QuietHours(""), clock=clock)
+    monkeypatch.setattr(pipeline, "STEPS", standing_in(w, clock))
+    book_id = submit(w, chekhov_epub)
+    seen, check = [], w._check
+    w.ctx.quiet.on_check = lambda: (check(), seen.append(w.library.details(w.library.get(book_id))))
+
+    w.run(until_idle=True)
+
+    fixing = next(b for b in seen if b["step"] == "fix")
+    assert fixing["state"] == "running" and fixing["has_cover"] and fixing["title"] == "Альтов"
+    assert fixing["author"] == "Г. Альтов"
+    assert fixing["chapters"] == [{"title": "Первая", "start": None}, {"title": "Вторая", "start": None}]
+    assert (w.settings.library / book_id / "cover.jpg").read_bytes() == b"\xff\xd8cover"
+    done = w.library.details(w.library.get(book_id))
+    assert done["chapters"] == [{"title": "Первая", "start": 0.0}] and done["has_cover"]
+
+
+def test_a_second_take_is_not_another_piece(tmp_path):
+    book = Book(tmp_path)
+    assert worker.pieces(book) == (0, 0)
+    book.write("chunks.json", [{"text": "а"}] * 3)
+    (tmp_path / "tts").mkdir()
+    for name in ("00000.wav", "00000.s1.wav", "00000.s2.wav", "00001.tmp.wav", "00002.wav"):
+        (tmp_path / "tts" / name).touch()
+    assert worker.pieces(book) == (3, 2)
+    assert worker.pieces(book, "ready") == (3, 0)
+
+
+def test_the_estimate_of_one_step(tmp_path):
+    book = Book(tmp_path)
+    assert worker.plan(book, set()) is None, "nothing to go by before the text is read"
+    book.write("scan.json", {"title": "", "author": "", "outline": [], "pages": ["p1.jpg", "p2.jpg"]})
+    scan = worker.plan(book, set())
+    assert scan and scan["ocr"] == 2 * worker.PAGE_OCR and scan["tts"] > 0
+    book.path("scan.json").unlink()
+    book.write("text.json", {"chapters": [{"title": "", "paragraphs": ["а" * 100000]}], "figures": [{}] * 3})
+    cost = worker.plan(book, {"verify"})
+    assert cost and cost["verify"] == 0 and cost["figures"] == 3 * worker.FIGURE
+    assert round(cost["tts"]) == 2237
+    total = sum(cost.values())
+    before = cost["extract"] + cost["figures"]
+    start, eta = worker.estimate(book, cost, "fix", 0, before)
+    assert eta == round(total - before) and start == int(100 * before / total)
+    half = worker.estimate(book, cost, "fix", cost["fix"] / 2, before + cost["fix"] / 2)
+    over = worker.estimate(book, cost, "fix", cost["fix"] * 5, before + cost["fix"] * 5)
+    assert start < half[0] < over[0] < 100 * (before + cost["fix"]) / total, "never past its step"
+    assert abs(half[1] - (eta - cost["fix"] / 2)) <= 1
+    assert over[1] > half[1], "a step going on and on is a slower card"
+    end = worker.estimate(book, cost, "sync", 0, total - cost["sync"])
+    assert end == (99, round(cost["sync"]))
+
+
+def test_a_database_from_before_gets_the_new_columns(tmp_path):
+    settings = settings_for(tmp_path)
+    settings.db.parent.mkdir(parents=True, exist_ok=True)
+    old = sqlite3.connect(settings.db)
+    old.executescript(library.SCHEMA)
+    old.execute("insert into books (id, sha, format, added, updated) values ('a', 's', 'epub', 0, 0)")
+    old.commit()
+    old.close()
+    lib = library.Library(settings)
+    assert (lib.info(lib.get("a"))["percent"], lib.info(lib.get("a"))["eta"]) == (0, None)
+    library.Library(settings)  # and again, with the columns already there
+
+
+def test_the_contract_names_the_steps_in_their_order():
+    assert list(typing.get_args(contract.Step)) == [s.name for s in pipeline.STEPS] + ["publish"]
+    assert list(worker.STEPS_RU) == list(typing.get_args(contract.Step))
+    assert set(worker.COST) == {s.name for s in pipeline.STEPS}

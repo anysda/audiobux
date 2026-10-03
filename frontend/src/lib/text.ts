@@ -1,3 +1,5 @@
+import type { Book } from './api';
+
 export const fmt = (s: number) => {
   s = Math.max(0, Math.floor(s));
   const h = Math.floor(s / 3600),
@@ -22,3 +24,35 @@ export const fmtSpeed = (v: number) => String(v).replace('.', ',') + '×';
 export const gb = (bytes: number) => (bytes / 1e9).toFixed(1).replace('.', ',');
 
 export const letter = (title: string) => (title.trim()[0] ?? '·').toUpperCase();
+
+const STEPS: Record<string, string> = {
+  extract: 'Читаю файл',
+  ocr: 'Распознаю текст',
+  figures: 'Описываю рисунки',
+  fix: 'Правлю текст',
+  epub: 'Собираю EPUB',
+  normalize: 'Готовлю текст к чтению',
+  chunk: 'Режу на фрагменты',
+  tts: 'Озвучиваю',
+  verify: 'Проверяю на слух',
+  assemble: 'Собираю аудиокнигу',
+  sync: 'Связываю текст и звук',
+};
+
+// what the worker is busy with, in words; a book short of done never reads 100%
+export const stage = (b: Book) =>
+  b.state === 'queued'
+    ? 'В очереди'
+    : b.state === 'paused'
+      ? 'На паузе'
+      : `${(b.step && STEPS[b.step]) || 'В работе'} · ${Math.min(99, Math.floor(b.percent))}%`;
+
+// a rough time to wait: minutes under an hour, five-minute steps under ten hours, then whole hours
+export const left = (eta: number | null | undefined) => {
+  if (eta == null || !Number.isFinite(eta) || eta < 0) return '';
+  if (eta < 60) return 'Осталось меньше минуты';
+  const m = eta < 3600 ? Math.max(1, Math.round(eta / 60)) : eta < 36000 ? Math.round(eta / 300) * 5 : Math.round(eta / 3600) * 60;
+  const h = Math.floor(m / 60),
+    r = m % 60;
+  return `Осталось ~${h ? `${h} ч` : ''}${h && r ? ' ' : ''}${r ? `${r} мин` : ''}`;
+};

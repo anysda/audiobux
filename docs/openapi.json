@@ -1016,7 +1016,21 @@
           "step": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "enum": [
+                  "extract",
+                  "ocr",
+                  "figures",
+                  "fix",
+                  "epub",
+                  "normalize",
+                  "chunk",
+                  "tts",
+                  "verify",
+                  "assemble",
+                  "sync",
+                  "publish"
+                ]
               },
               {
                 "type": "null"
@@ -1035,6 +1049,17 @@
           "percent": {
             "type": "integer",
             "title": "Percent"
+          },
+          "eta": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eta"
           },
           "error": {
             "anyOf": [
@@ -1086,6 +1111,7 @@
           "pieces_done",
           "pieces_total",
           "percent",
+          "eta",
           "error",
           "added",
           "updated",
@@ -1093,7 +1119,8 @@
           "has_epub",
           "has_cover"
         ],
-        "title": "Book"
+        "title": "Book",
+        "description": "`percent` is the whole of the work, every step weighed by what it takes for a book\nof this size: it never goes back and stays at 99 at most until the book is done.\n`eta` is the seconds left at the speed this book has gone so far, null until the\ntext is read; it stands still while the book is paused for quiet hours."
       },
       "BookDetails": {
         "properties": {
@@ -1127,7 +1154,21 @@
           "step": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "enum": [
+                  "extract",
+                  "ocr",
+                  "figures",
+                  "fix",
+                  "epub",
+                  "normalize",
+                  "chunk",
+                  "tts",
+                  "verify",
+                  "assemble",
+                  "sync",
+                  "publish"
+                ]
               },
               {
                 "type": "null"
@@ -1146,6 +1187,17 @@
           "percent": {
             "type": "integer",
             "title": "Percent"
+          },
+          "eta": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eta"
           },
           "error": {
             "anyOf": [
@@ -1204,6 +1256,7 @@
           "pieces_done",
           "pieces_total",
           "percent",
+          "eta",
           "error",
           "added",
           "updated",
@@ -1249,7 +1302,14 @@
             "title": "Title"
           },
           "start": {
-            "type": "number",
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Start"
           }
         },

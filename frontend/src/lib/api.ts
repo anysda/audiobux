@@ -12,6 +12,8 @@ export interface Book {
   pieces_done: number;
   pieces_total: number;
   percent: number;
+  // seconds until the book is ready, when the worker can tell
+  eta?: number | null;
   error: string | null;
   added: number;
   updated: number;
@@ -103,9 +105,10 @@ const json = (body: unknown): RequestInit => ({
 });
 
 export const url = {
-  cover: (id: string) => `/api/books/${id}/cover`,
   audio: (id: string) => `/api/books/${id}/audio`,
+  cover: (id: string, v: number) => `/api/books/${id}/cover?v=${v}`,
   m4b: (id: string) => `/api/books/${id}/m4b`,
+  epub: (id: string) => `/api/books/${id}/epub`,
   // a figure's src in sync.json is `figures/<name>.jpg`, relative to the book
   figure: (id: string, src: string) => `/api/books/${id}/${src}`,
 };

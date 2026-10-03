@@ -1,8 +1,8 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { lib } from './lib/state.svelte';
-  import type { Book } from './lib/api';
-  import { books, fmt, fmtShort, fmtSpeed, gb } from './lib/text';
+  import { url, type Book } from './lib/api';
+  import { books, fmt, fmtShort, fmtSpeed, gb, left, stage } from './lib/text';
   import { ED, EIO, EO, inset, reveal, rise, still } from './lib/motion';
   import { press } from './lib/press';
   import Cover from './lib/Cover.svelte';
@@ -49,12 +49,8 @@
     if (openId && !open) openId = null;
   });
 
-  const wait = { 'Озвучивается': 'running', 'В очереди': 'queued', 'На паузе': 'paused' } as const;
-  const stateText = (b: Book) =>
-    (Object.keys(wait) as (keyof typeof wait)[]).find((k) => wait[k] === b.state) ?? '';
-
   const hold = (b: Book) => ({
-    open: () => b.state === 'done' && void show(b),
+    open: () => b.state !== 'failed' && void show(b),
     toggle: () => lib.toggle(b.id),
     picking: () => picking,
   });
@@ -62,6 +58,7 @@
   async function show(b: Book) {
     src = list?.querySelector<HTMLElement>(`[data-id="${b.id}"]`) ?? null;
     lib.load(b.id);
+    void lib.loadDetails(b.id);
     openId = b.id;
     tab = 0;
     await tick();
@@ -84,7 +81,7 @@
       );
     }
     reveal(bookEl.querySelector('.hero2 h2'), 160, 55);
-    rise([...bookEl.querySelectorAll('.hero2 .mono,.time,.scrub,.ctl,.chh,.chl')], 260, 60, 20);
+    rise([...bookEl.querySelectorAll('.hero2 .mono,.wk,.time,.scrub,.ctl,.dl,.chh,.chl')], 260, 60, 20);
   }
 
   function hide() {
@@ -188,7 +185,7 @@
   <Silhouette id="lb" />
   <section class="lib" bind:this={libEl}>
     <header class="lh">
-      <div class="lead"><p class="mono">{books(lib.done.length)}</p></div>
+      <div class="lead"><p class="mono">{books(lib.books.length)}</p></div>
     </header>
     <div bind:this={list}>
       {#if !lib.ready}
@@ -241,8 +238,9 @@
               {#if b.error}<span class="mono err">{b.error}</span>{/if}
               <button class="pill mono" data-own onclick={() => lib.retry(b.id)}>Повторить</button>
             {:else}
-              <span class="mono">{stateText(b)}{b.state === 'running' ? ` · ${Math.round(b.percent)}%` : ''}</span>
+              <span class="mono">{stage(b)}</span>
               <div class="bar"><i style:--p={b.percent / 100}></i></div>
+              {#if b.state === 'running' && left(b.eta)}<span class="mono">{left(b.eta)}</span>{/if}
             {/if}
           </div>
           <div class="ck"><svg viewBox="0 0 24 24"><path d="M5 12l5 5 9-10" /></svg></div>
@@ -274,7 +272,10 @@
   >
   <div class="menu" class:off={!menu} role="menu" inert={!menu}>
     <button role="menuitem" onclick={remove}>Удалить <span>{lib.sel.length}</span></button>
-    <button role="menuitem" onclick={() => lib.download()}>Скачать <span>m4b</span></button>
+    <button role="menuitem" onclick={() => lib.download('m4b')}>Скачать <span>m4b</span></button>
+    {#if lib.picked.some((b) => b.has_epub)}
+      <button role="menuitem" onclick={() => lib.download('epub')}>Скачать <span>EPUB</span></button>
+    {/if}
     <button role="menuitem" onclick={() => lib.mark(true)}>Прослушано</button>
     <button role="menuitem" onclick={() => lib.mark(false)}>Не прослушано</button>
   </div>
@@ -304,17 +305,43 @@
       <Silhouette id="b" />
       <header class="bt">
         <button class="back mono" onclick={hide}>Назад</button>
-        <div class="tabs" role="tablist">
-          <i></i><button role="tab" aria-selected={tab === 0} onclick={() => setTab(0)}>Аудио</button><button
-            role="tab"
-            aria-selected={tab === 1}
-            onclick={() => setTab(1)}>Книга</button
-          >
-        </div>
-        <button class="gear mono" aria-label="Настройки" onclick={openSheet}>{tab === 0 ? fmtSpeed(lib.speed) : 'Aa'}</button>
+        {#if open.state === 'done'}
+          <div class="tabs" role="tablist">
+            <i></i><button role="tab" aria-selected={tab === 0} onclick={() => setTab(0)}>Аудио</button><button
+              role="tab"
+              aria-selected={tab === 1}
+              onclick={() => setTab(1)}>Книга</button
+            >
+          </div>
+          <button class="gear mono" aria-label="Настройки" onclick={openSheet}>{tab === 0 ? fmtSpeed(lib.speed) : 'Aa'}</button>
+        {/if}
       </header>
 
-      {#if tab === 0}
+      {#if open.state !== 'done'}
+        {@const ch = lib.chapters(open.id)}
+        <div class="pane pl">
+          <div class="hero2">
+            <div class="hl">
+              <Title text={open.title} max={60} min={26} height={() => cover2?.offsetHeight} />
+              <span class="mono">{open.author}</span>
+            </div>
+            <Cover book={open} bind:el={cover2} />
+          </div>
+          <div class="wk">
+            <span class="mono">{stage(open)}</span>
+            <div class="bar"><i style:--p={open.percent / 100}></i></div>
+            {#if open.state === 'running' && left(open.eta)}<span class="mono">{left(open.eta)}</span>{/if}
+          </div>
+          <div class="chh mono"><span>Главы</span><span>{ch.length || ''}</span></div>
+          <div class="chl" bind:this={chl}>
+            {#each ch as c, i (i)}
+              <p class="toc"><span class="mono">{String(i + 1).padStart(2, '0')}</span><span>{c.title}</span></p>
+            {:else}
+              <p class="mono none">Оглавление появится, когда прочитаю файл</p>
+            {/each}
+          </div>
+        </div>
+      {:else if tab === 0}
         {@const at = lib.at(open.id)}
         {@const len = lib.length(open)}
         {@const ch = lib.chapters(open.id)}
@@ -337,6 +364,10 @@
               ></button
             >
             <button class="sk mono" aria-label="Вперёд на 30 секунд" onclick={() => lib.skip(open.id, 30)}>+30</button>
+          </div>
+          <div class="dl">
+            <a class="pill mono" href={url.m4b(open.id)} download>Скачать m4b</a>
+            {#if open.has_epub}<a class="pill mono" href={url.epub(open.id)} download>Скачать EPUB</a>{/if}
           </div>
           <div class="chh mono"><span>Главы</span><span>{ch.length || ''}</span></div>
           <div class="chl" bind:this={chl}>
@@ -403,3 +434,46 @@
     </section>
   {/if}
 </div>
+
+<style>
+  .wk {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 26px;
+  }
+  .dl {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 22px;
+  }
+  .dl a:active {
+    transform: scale(0.96);
+  }
+  .dl a + a {
+    background: none;
+    color: inherit;
+    box-shadow: inset 0 0 0 1.2px currentColor;
+  }
+  .toc {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr);
+    gap: 10px;
+    align-items: baseline;
+    margin: 0;
+    padding: 13px 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--white) 28%, transparent);
+  }
+  .toc span:nth-child(2) {
+    font:
+      600 20px/1.02 var(--display);
+    font-stretch: 32%;
+    text-transform: uppercase;
+    letter-spacing: 0.005em;
+  }
+  .none {
+    margin: 0;
+    padding: 13px 0;
+  }
+</style>

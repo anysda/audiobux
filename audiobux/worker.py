@@ -12,6 +12,7 @@ import gc
 import hashlib
 import json
 import logging
+import math
 import os
 import queue
 import shutil
@@ -24,7 +25,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from . import contract, fetch, formats, pipeline
+from . import contract, fetch, formats, pipeline, reading
 from .book import Book
 from .config import Settings
 from .contract import Fault
@@ -52,6 +53,28 @@ STEPS_RU = {
     "publish": "перенос в библиотеку",
 }
 
+# what a step takes: (seconds, seconds per 1000 characters of the book's text), as a
+# 132-page book of 256 639 characters took them on the service's own card, 3 h in all
+COST = {
+    "extract": (3.0, 0.07),
+    "ocr": (0.0, 0.0),
+    "figures": (0.0, 0.0),
+    "fix": (0.0, 2.85),
+    "epub": (0.0, 0.0),
+    "normalize": (20.0, 5.65),
+    "chunk": (2.0, 0.0),
+    "tts": (0.0, 22.37),
+    "verify": (0.0, 7.51),
+    "assemble": (0.0, 3.57),
+    "sync": (3.0, 0.0),
+}
+# characters of a scanned page until it is read, as in that book; seconds to read a
+# page and to tell a figure, guessed: neither has been timed yet
+PAGE_CHARS, PAGE_OCR, FIGURE = 1950, 30.0, 4.0
+# seconds of work at the measured speed counted in with the book's own, so that its
+# first seconds do not throw the estimate about
+PRIOR = 60.0
+
 
 class Stopped(BaseException):
     """The book being voiced was deleted. Not an `Exception`, so no step catches it."""
@@ -69,7 +92,13 @@ class Worker:
         self.current: tuple[str, Book] | None = None
         self.deleted = False
         self.subscribers: set[queue.Queue[contract.Event]] = set()
+        self.clock = time.monotonic
         self._saved = 0.0
+        # seconds the book has been worked on, not counting pauses; when the step began
+        # and when the count was last brought up to date, None while paused
+        self._worked = self._began = 0.0
+        self._tick: float | None = None
+        self._step, self._percent = "extract", 0
         self._lazy = _lazy_attributes(ctx.models)
         quiet = ctx.quiet
         quiet.on_check, quiet.on_pause, quiet.on_resume = self._check, self._pause, self._resume
@@ -91,6 +120,9 @@ class Worker:
             self.ctx.quiet.sleep(left or IDLE)
 
     def voice(self, book_id: str, book: Book) -> None:
+        row = self.library.get(book_id)
+        self._worked, self._percent = (row["worked"], row["percent"]) if row else (0.0, 0)
+        self._tick = self.clock()
         self._set(book_id, state="running")
         self._lazy = _lazy_attributes(self.ctx.models)  # nothing is loaded between books
         step = "extract"
@@ -98,9 +130,8 @@ class Worker:
             for s in pipeline.STEPS:
                 if not book.done(s.name):
                     step = s.name
-                    self._set(book_id, step=step)
+                    self._begin(book_id, book, step)
                     pipeline.run(book, self.ctx, until=step)
-                    self._progress(book_id, book, about(book))
                     self.unload()  # the next step loads its own model
             step = "publish"
             self._publish(book_id, book)
@@ -109,8 +140,9 @@ class Worker:
             log.info("%s: deleted while being voiced, stopped", book_id)
         except Exception as e:
             log.exception("%s: failed at %s", book_id, step)
-            self._set(book_id, state="failed", step=step, error=error_text(step, e))
+            self._set(book_id, state="failed", step=step, error=error_text(step, e), eta=None)
         finally:
+            self._tick = None
             with self.lock:
                 deleted, self.current = self.deleted, None
             if deleted:
@@ -133,6 +165,17 @@ class Worker:
             book.path("name").write_text((title or "Без названия") + source.suffix)
         return book
 
+    def _begin(self, book_id: str, book: Book, step: str) -> None:
+        """What the steps before have made is shown: the title, the chapters, the cover."""
+        self._accrue()
+        self._step, self._began = step, self._worked
+        cover, shown = book.path("cover.jpg"), self.settings.library / book_id / "cover.jpg"
+        if cover.exists() and not shown.exists():
+            shutil.copyfile(cover, book.path("shown.jpg"))
+            os.replace(book.path("shown.jpg"), shown)
+        chapters = [contract.Chapter(title=t, start=None) for t in outline(book)]
+        self._progress(book_id, book, about(book), step=step, chapters=json.dumps(chapters, ensure_ascii=False))
+
     def _publish(self, book_id: str, book: Book) -> None:
         folder = self.settings.library / book_id
         # the figures of the sync, the sync, the EPUB and the cover first, so they are
@@ -154,6 +197,9 @@ class Worker:
             error=None,
             pieces_done=total,
             pieces_total=total,
+            percent=100,
+            eta=0,
+            worked=self._worked,
             duration=made["duration"],
             chapters=json.dumps(made["chapters"], ensure_ascii=False),
         )
@@ -164,22 +210,47 @@ class Worker:
     def _check(self) -> None:
         if self.deleted:
             raise Stopped
-        if self.current and time.monotonic() - self._saved >= PROGRESS_EVERY:
+        if self.current and self.clock() - self._saved >= PROGRESS_EVERY:
             self._progress(*self.current)
 
     def _pause(self) -> None:
         self.unload()
         if self.current:
+            self._accrue()
+            self._tick = None
             self._progress(*self.current, state="paused")
 
     def _resume(self) -> None:
         if self.current:
+            self._tick = self.clock()
             self._set(self.current[0], state="running")
 
+    def _accrue(self) -> None:
+        if self._tick is not None:
+            now = self.clock()
+            self._worked += now - self._tick
+            self._tick = now
+
     def _progress(self, book_id: str, book: Book, more: dict[str, str] | None = None, **fields: object) -> None:
-        self._saved = time.monotonic()
+        self._accrue()
+        self._saved = self.clock()
         total, done = pieces(book)
-        self._set(book_id, pieces_done=done, pieces_total=total, **(more or {}), **fields)
+        models = self.ctx.models
+        cost = plan(book, set() if models.listener or models.aligner else {"verify"})
+        eta = None
+        if cost:
+            percent, eta = estimate(book, cost, self._step, self._worked - self._began, self._worked)
+            self._percent = max(self._percent, percent)
+        self._set(
+            book_id,
+            pieces_done=done,
+            pieces_total=total,
+            percent=self._percent,
+            eta=eta,
+            worked=self._worked,
+            **(more or {}),
+            **fields,
+        )
 
     def _set(self, book_id: str, **fields: object) -> None:
         if self.library.update(book_id, **fields):
@@ -352,13 +423,66 @@ def about(book: Book) -> dict[str, str]:
     return {}
 
 
-def pieces(book: Book) -> tuple[int, int]:
-    """(pieces in the book, pieces voiced)."""
+def outline(book: Book) -> list[str]:
+    """The titles of the chapters as the m4b will have them, once the text is read."""
+    for name in ("normalized.json", "fixed.json", "described.json", "text.json"):
+        if book.path(name).exists():
+            return reading.titles(book.read(name), book.name)
+    return []
+
+
+def pieces(book: Book, folder: str = "tts") -> tuple[int, int]:
+    """(pieces in the book, pieces voiced, or heard with `folder="ready"`); a second
+    take (`00012.s1.wav`) is not another piece."""
     if not book.path("chunks.json").exists():
         return 0, 0
     total = len(book.read("chunks.json"))
-    done = sum(1 for p in book.path("tts").glob("*.wav") if not p.name.endswith(".tmp.wav"))
+    done = sum(1 for p in book.path(folder).glob("*.wav") if p.stem.isdigit())
     return total, min(done, total)
+
+
+def plan(book: Book, skip: set[str]) -> dict[str, float] | None:
+    """Seconds each step takes for this book at the measured speed, None until its text is read."""
+    scan = book.read("scan.json") if book.path("scan.json").exists() else None
+    if book.path("text.json").exists():
+        text = book.read("text.json")
+        chars = sum(len(p) for c in text["chapters"] for p in c["paragraphs"])
+        figures = len(text.get("figures", []))
+    elif scan:
+        chars, figures = len(scan["pages"]) * PAGE_CHARS, 0
+    else:
+        return None
+    cost = {s: 0.0 if s in skip else base + per * chars / 1000 for s, (base, per) in COST.items()}
+    cost["ocr"] = len(scan["pages"]) * PAGE_OCR if scan else 0.0
+    cost["figures"] = figures * FIGURE
+    return cost
+
+
+def estimate(book: Book, cost: dict[str, float], step: str, spent: float, worked: float) -> tuple[int, int]:
+    """(percent, seconds left) of a book `worked` seconds into, `spent` of them on `step`.
+    The pieces voiced or heard tell how far `tts` and `verify` are; any other step is
+    as far as its time at the book's speed so far says, never quite at its end."""
+    names = [s.name for s in pipeline.STEPS]
+    before = sum(cost[n] for n in names[: names.index(step)])
+    total = sum(cost.values())
+    if step in ("tts", "verify"):
+        count, done = pieces(book, "tts" if step == "tts" else "ready")
+        share = done / count if count else 0.0
+        speed = (worked + PRIOR) / (before + share * cost[step] + PRIOR)
+        left = total - before - share * cost[step]
+    else:
+        speed = (worked - spent + PRIOR) / (before + PRIOR)
+        x = spent / (speed * cost[step]) if cost[step] else 0.0
+        share = _eased(x)
+        # a step going on past its time is a slower card
+        speed = max(speed, (worked + PRIOR) / (before + cost[step] + PRIOR))
+        left = total - before - min(x, 1) * cost[step]
+    return min(99, int(100 * (before + share * cost[step]) / total)), round(speed * left)
+
+
+def _eased(x: float) -> float:
+    """`x` up to 0.9, then on towards 1 without reaching it."""
+    return x if x <= 0.9 else 1 - 0.1 * math.exp(-(x - 0.9) / 0.1)
 
 
 def error_text(step: str, error: Exception) -> str:

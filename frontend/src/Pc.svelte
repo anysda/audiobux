@@ -2,8 +2,8 @@
   import { tick } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import { lib } from './lib/state.svelte';
-  import type { Book } from './lib/api';
-  import { books, fmt, fmtShort, fmtSpeed, gb } from './lib/text';
+  import { url, type Book } from './lib/api';
+  import { books, fmt, fmtShort, fmtSpeed, gb, left, stage } from './lib/text';
   import { ED, EO, inset, reveal, rise, still } from './lib/motion';
   import Cover from './lib/Cover.svelte';
   import Title from './lib/Title.svelte';
@@ -21,6 +21,8 @@
   let bookEl = $state<HTMLElement>();
   let pop = $state<'spd' | 'aa' | null>(null);
   let openId = $state<string | null>(null);
+  // the library's top bar comes back as the book starts to close, so the way back lands where the card is
+  let closing = $state(false);
   let src: HTMLElement | null = null;
 
   const picking = $derived(lib.sel.length > 0);
@@ -39,13 +41,12 @@
     if (openId && !open) openId = null;
   });
 
-  const wait = { running: 'Озвучивается', queued: 'В очереди', paused: 'На паузе', failed: 'Ошибка', done: '' } as const;
-
   async function show(b: Book, from?: HTMLElement | null) {
-    if (b.state !== 'done') return;
+    if (b.state === 'failed') return;
     pop = null;
     src = from ?? null;
     lib.load(b.id);
+    void lib.loadDetails(b.id);
     openId = b.id;
     await tick();
     if (still() || !bookEl || !main || !plib) return;
@@ -54,12 +55,17 @@
     if (r) bookEl.animate([{ clipPath: inset(r, m, ' round 12px') }, { clipPath: 'inset(0px round 0px)' }], { duration: 560, easing: ED });
     plib.animate([{ transform: 'none', opacity: 1 }, { transform: 'scale(.97)', opacity: 0.3 }], { duration: 560, easing: ED, fill: 'forwards' });
     reveal(bookEl.querySelector('.hero2 h2'), 160, 55);
-    rise([...bookEl.querySelectorAll('.pside .hero2 .mono,.pside .chh,.pchl,.prh,.prd article')], 240, 60, 18);
+    rise([...bookEl.querySelectorAll('.pside .hero2 .mono,.pside .wk,.pside .dl,.pside .chh,.pchl,.prh,.prd article')], 240, 60, 18);
   }
 
-  function hide() {
+  async function hide() {
     pop = null;
-    const done = () => (openId = null);
+    const done = () => {
+      openId = null;
+      closing = false;
+    };
+    closing = true;
+    await tick();
     plib?.getAnimations().forEach((a) => a.cancel());
     const r = src?.isConnected ? src.querySelector('.cv')?.getBoundingClientRect() : null;
     if (still() || !r || !bookEl || !main || !plib) return done();
@@ -102,7 +108,7 @@
     if (e.key === 'Escape') {
       if (pop) pop = null;
       else if (picking) lib.clear();
-      else if (openId) hide();
+      else if (openId) void hide();
       return;
     }
     const t = e.target as Element;
@@ -121,33 +127,38 @@
 
 <svelte:window onkeydown={key} onpointerdown={outside} />
 
-<div class="pc" class:psel={picking}>
+<div class="pc" class:psel={picking} class:bare={open && !closing}>
   <Silhouette id="pl" pc />
-  <header class="ptop">
-    <span class="mono">{books(lib.done.length)}</span>
-    {#if picking}
-      <div class="pacts">
-        <span class="mono">Выбрано: {lib.sel.length}</span>
-        <button class="pbtn" onclick={() => lib.download()}>Скачать m4b</button>
-        <button class="pbtn" onclick={() => lib.mark(true)}>Прослушано</button>
-        <button class="pbtn" onclick={() => lib.mark(false)}>Не прослушано</button>
-        <button class="pbtn" onclick={remove}>Удалить</button>
-        <button class="pbtn solid" onclick={() => lib.clear()}>Отмена</button>
-      </div>
-    {:else}
-      <label class="padd"
-        ><svg viewBox="0 0 24 24"><path d="M12 4v16M4 12h16" /></svg>Добавить книгу<input
-          type="file"
-          multiple
-          accept={lib.formats.join(',')}
-          onchange={(e) => {
-            void lib.upload(e.currentTarget.files);
-            e.currentTarget.value = '';
-          }}
-        /></label
-      >
-    {/if}
-  </header>
+  {#if !open || closing}
+    <header class="ptop">
+      <span class="mono">{books(lib.books.length)}</span>
+      {#if picking}
+        <div class="pacts">
+          <span class="mono">Выбрано: {lib.sel.length}</span>
+          <button class="pbtn" onclick={() => lib.download('m4b')}>Скачать m4b</button>
+          {#if lib.picked.some((b) => b.has_epub)}
+            <button class="pbtn" onclick={() => lib.download('epub')}>Скачать EPUB</button>
+          {/if}
+          <button class="pbtn" onclick={() => lib.mark(true)}>Прослушано</button>
+          <button class="pbtn" onclick={() => lib.mark(false)}>Не прослушано</button>
+          <button class="pbtn" onclick={remove}>Удалить</button>
+          <button class="pbtn solid" onclick={() => lib.clear()}>Отмена</button>
+        </div>
+      {:else}
+        <label class="padd"
+          ><svg viewBox="0 0 24 24"><path d="M12 4v16M4 12h16" /></svg>Добавить книгу<input
+            type="file"
+            multiple
+            accept={lib.formats.join(',')}
+            onchange={(e) => {
+              void lib.upload(e.currentTarget.files);
+              e.currentTarget.value = '';
+            }}
+          /></label
+        >
+      {/if}
+    </header>
+  {/if}
 
   <main class="pmain" bind:this={main}>
     <section class="plib" bind:this={plib}>
@@ -202,7 +213,7 @@
           {#each lib.books as b (b.id)}
             <div
               class="dc"
-              class:ld={b.state !== 'done'}
+              class:ld={b.state === 'failed'}
               class:on={lib.sel.includes(b.id)}
               class:cur={lib.cur === b.id}
               data-id={b.id}
@@ -216,8 +227,9 @@
                 <span class="dck"><svg viewBox="0 0 24 24"><path d="M5 12l5 5 9-10" /></svg></span>
                 {#if b.state === 'running' || b.state === 'queued' || b.state === 'paused'}
                   <div class="dld">
-                    <span class="mono">{wait[b.state]}{b.state === 'running' ? ` · ${Math.round(b.percent)}%` : ''}</span>
+                    <span class="mono">{stage(b)}</span>
                     <div class="bar"><i style:--p={b.percent / 100}></i></div>
+                    {#if b.state === 'running' && left(b.eta)}<span class="mono">{left(b.eta)}</span>{/if}
                   </div>
                 {/if}
               </div>
@@ -258,23 +270,42 @@
             </div>
             <Cover book={open} />
           </div>
+          {#if open.state === 'done'}
+            <div class="dl">
+              <a class="pill mono" href={url.m4b(open.id)} download>Скачать m4b</a>
+              {#if open.has_epub}<a class="pill mono" href={url.epub(open.id)} download>Скачать EPUB</a>{/if}
+            </div>
+          {:else}
+            <div class="wk">
+              <span class="mono">{stage(open)}</span>
+              <div class="bar"><i style:--p={open.percent / 100}></i></div>
+              {#if open.state === 'running' && left(open.eta)}<span class="mono">{left(open.eta)}</span>{/if}
+            </div>
+          {/if}
           <div class="chh mono"><span>Главы</span><span>{ch.length || ''}</span></div>
           <div class="chl pchl">
             {#each ch as c, i (i)}
-              <button aria-current={i === ci} onclick={() => lib.seek(open.id, c.start)}
-                ><span class="mono">{String(i + 1).padStart(2, '0')}</span><span>{c.title}</span><span class="mono"
-                  >{fmtShort(c.end - c.start)}</span
-                ></button
-              >
+              {#if open.state === 'done'}
+                <button aria-current={i === ci} onclick={() => lib.seek(open.id, c.start)}
+                  ><span class="mono">{String(i + 1).padStart(2, '0')}</span><span>{c.title}</span><span class="mono"
+                    >{fmtShort(c.end - c.start)}</span
+                  ></button
+                >
+              {:else}
+                <p class="toc"><span class="mono">{String(i + 1).padStart(2, '0')}</span><span>{c.title}</span></p>
+              {/if}
+            {:else}
+              <p class="mono none">Оглавление появится, когда прочитаю файл</p>
             {/each}
           </div>
         </aside>
         <div class="pread" data-s={lib.scheme}>
-          <div class="prh">
-            <span class="mono">Текст книги</span>
-            <button class="gear mono" data-pop aria-label="Вид текста" aria-expanded={pop === 'aa'} onclick={() => toggle('aa')}>Aa</button>
-          </div>
-          <Reader id={open.id} wide />
+          {#if open.state === 'done'}
+            <div class="prh">
+              <button class="gear mono" data-pop aria-label="Вид текста" aria-expanded={pop === 'aa'} onclick={() => toggle('aa')}>Aa</button>
+            </div>
+            <Reader id={open.id} wide />
+          {/if}
         </div>
       </section>
     {/if}
@@ -336,3 +367,52 @@
   </div>
   <Toast />
 </div>
+
+<style>
+  .bare {
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+  .prh {
+    justify-content: flex-end;
+  }
+  .wk {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 24px;
+  }
+  .dl {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 22px;
+  }
+  .dl a:active {
+    transform: scale(0.96);
+  }
+  .dl a + a {
+    background: none;
+    color: inherit;
+    box-shadow: inset 0 0 0 1.2px currentColor;
+  }
+  .toc {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr);
+    gap: 10px;
+    align-items: baseline;
+    margin: 0;
+    padding: 13px 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--white) 28%, transparent);
+  }
+  .toc span:nth-child(2) {
+    font:
+      600 20px/1.02 var(--display);
+    font-stretch: 32%;
+    text-transform: uppercase;
+    letter-spacing: 0.005em;
+  }
+  .none {
+    margin: 0;
+    padding: 13px 0;
+  }
+</style>

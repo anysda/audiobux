@@ -36,6 +36,8 @@ create table if not exists books (
 );
 create index if not exists books_sha on books (sha);
 """
+# columns that came later: a database made before them gets them on the next start
+ADDED = {"percent": "integer not null default 0", "eta": "integer", "worked": "real not null default 0"}
 
 UNFINISHED = "('queued', 'running', 'paused')"
 
@@ -52,6 +54,10 @@ class Library:
         self.db.row_factory = sqlite3.Row
         self.db.execute("pragma journal_mode=wal")
         self.db.executescript(SCHEMA)
+        has = {row["name"] for row in self.db.execute("pragma table_info(books)")}
+        for name, kind in ADDED.items():
+            if name not in has:
+                self.db.execute(f"alter table books add column {name} {kind}")
 
     def _rows(self, sql: str, args: tuple[object, ...] = ()) -> list[sqlite3.Row]:
         with self._lock:
@@ -120,7 +126,8 @@ class Library:
             step=row["step"],
             pieces_done=done,
             pieces_total=total,
-            percent=100 if row["state"] == "done" else done * 100 // total if total else 0,
+            percent=100 if row["state"] == "done" else row["percent"],
+            eta=row["eta"],
             error=row["error"],
             added=row["added"],
             updated=row["updated"],
