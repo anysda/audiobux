@@ -10,13 +10,15 @@ from RUAccent as `+` before the stressed vowel.
 
 import logging
 import re
+from collections import Counter
 from collections.abc import Callable
+from functools import cache
 from pathlib import Path
 from typing import Any
 
 from rapidfuzz.distance import Levenshtein
 
-from .cleanup import _known
+from .cleanup import _known, _morph
 from .llm import Llm, parse_json
 from .takes import words
 
@@ -29,6 +31,34 @@ WORD = re.compile(r"[\w+]+(?:-[\w+]+)*")
 # one stress per word at most, `эс-кью-+эль` counts as one word
 CYRILLIC_READING = re.compile(r"^[а-яё\-]*\+?[а-яё\-]+(?: [а-яё\-]*\+?[а-яё\-]+)*$")
 ROMAN = re.compile(r"X{0,3}(IX|IV|V?I{0,3})")
+CAPS = re.compile(r"\b[^\W\d_]+(?:-[^\W\d_]+)*\b")
+SENTENCE_START = re.compile(r"(?:^|[.!?…])\W*$")
+# a caps word this short that is no ordinary word is an abbreviation: СССР, ТРИЗ, NASA
+ABBREVIATION_LETTERS = 5
+# ...or a caps word the book keeps writing so among ordinary text
+ABBREVIATION_REPEATS = 3
+SIGNS = {
+    "+": "плюс",
+    "-": "минус",
+    "−": "минус",
+    "=": "равно",
+    "×": "умножить на",
+    "*": "умножить на",
+    "÷": "разделить на",
+    "≈": "приблизительно равно",
+    "≠": "не равно",
+    "<": "меньше",
+    ">": "больше",
+    "≤": "меньше или равно",
+    "≥": "больше или равно",
+}
+# numbers and one-letter variables joined by signs: `2 + 2 = 4`, `x−1`, `a = -5`
+OPERAND = r"\(*[-−+]?(?:\d+(?:[.,]\d+)?|(?<!\w)[A-Za-zα-ωΑ-Ω](?!\w))\)*"
+FORMULA = re.compile(rf"{OPERAND}(?:\s*[-−+=×*÷≈≠<>≤≥]\s*{OPERAND})+")
+# between words a sign is read only where it cannot be anything else
+WORD_SIGN = re.compile(
+    r"(?<=[\w)»\"])\s+([+=−×÷≈≠])\s+(?=[\w(«\"?])|(?<=\w)=(?=\w)|(?<=\w)\+(?=[^\W\d_аеёиоуыэюяАЕЁИОУЫЭЮЯ])"
+)
 
 ABBREVIATIONS = {
     r"\bна\s+рис\.": "на рисунке",
@@ -94,11 +124,12 @@ class Speech:
     def prepare(
         self, chapters: list[list[str]], dictionary: Path, wait: Callable[[], None] = lambda: None
     ) -> list[list[str]]:
+        abbreviations = _abbreviations(chapters)
+        chapters = [[_expand(p, abbreviations) for p in paragraphs] for paragraphs in chapters]
         latin = self.dictionary(chapters, dictionary)
         out = []
         for paragraphs in chapters:
             wait()
-            paragraphs = [_expand(p) for p in paragraphs]
             if self.llm:
                 paragraphs = self.llm.map(self._numbers, paragraphs)
             out.append([self._read(p, latin) for p in paragraphs])
@@ -232,16 +263,91 @@ def write_dictionary(path: Path, words: dict[str, str]) -> None:
 
 def plain(text: str, latin: dict[str, str] | None = None) -> str:
     """Text reduced to bare lowercase words, for comparing what was said with what was meant."""
-    text = LATIN.sub(lambda m: (latin or {}).get(m.group(), m.group()), text)
-    text = _rules(_expand(text)).lower().replace("ё", "е").replace("+", "")
+    text = LATIN.sub(lambda m: (latin or {}).get(m.group(), m.group()), _expand(text))
+    text = _rules(text).lower().replace("ё", "е").replace("+", "")
     return " ".join(re.findall(r"\w+", text))
 
 
-def _expand(text: str) -> str:
+def _expand(text: str, abbreviations: frozenset[str] = frozenset()) -> str:
     for pattern, spoken in ABBREVIATIONS.items():
         text = re.sub(pattern, spoken, text)
     # versions and section numbers: `3.11` -> `3 точка 11`
-    return DOTTED.sub(lambda m: m.group(1) + m.group(2).replace(".", " точка "), text)
+    text = DOTTED.sub(lambda m: m.group(1) + m.group(2).replace(".", " точка "), text)
+    return _signs(_uncapped(text, abbreviations))
+
+
+def _uncapped(text: str, abbreviations: frozenset[str] = frozenset()) -> str:
+    """Caps the voice reads as shouting become plain words, capital only where a sentence
+    starts; an abbreviation and a Roman number stay as they are."""
+    found = list(CAPS.finditer(text))
+    loud = [_shouted(m.group(), abbreviations) for m in found]
+    # a one-letter word before a shouted one is part of the shout (`ХИТРОСТЬ И ФИЗИКА`),
+    # unless it is an initial: `Н. ЛИНЬКОВА`
+    for i in reversed(range(len(found) - 1)):
+        word = found[i].group()
+        if len(word) == 1 and word.isupper() and loud[i + 1]:
+            loud[i] = text[found[i].end()] != "."
+    for m, shout in reversed(list(zip(found, loud, strict=True))):
+        if shout:
+            word = m.group().lower()
+            if SENTENCE_START.search(text, 0, m.start()):
+                word = word.capitalize()
+            text = text[: m.start()] + word + text[m.end() :]
+    return text
+
+
+def _shouted(word: str, abbreviations: frozenset[str]) -> bool:
+    return (
+        len(word) > 1
+        and word.isupper()
+        and not ROMAN.fullmatch(word)
+        and word not in abbreviations
+        and not _abbreviation(word)
+    )
+
+
+@cache
+def _abbreviation(word: str) -> bool:
+    """Short and no ordinary word by the dictionary: СССР, ТРИЗ, NASA."""
+    if len(word.replace("-", "")) > ABBREVIATION_LETTERS:
+        return False
+    return not _known(word) or "Abbr" in _morph().parse(word.lower())[0].tag
+
+
+def _abbreviations(chapters: list[list[str]]) -> frozenset[str]:
+    """Short caps words the book writes in caps among ordinary text more often than in
+    lowercase, and not once or twice for emphasis: ИКР of a book on invention is no `икр`,
+    though the dictionary knows the word."""
+    caps: Counter[str] = Counter()
+    lower: Counter[str] = Counter()
+    for paragraph in (p for paragraphs in chapters for p in paragraphs):
+        found = CAPS.findall(paragraph)
+        among = not all(w.isupper() for w in found)
+        caps.update(w for w in found if among and w.isupper())
+        lower.update(w.lower() for w in found if not w.isupper())
+    return frozenset(
+        w
+        for w, n in caps.items()
+        if len(w.replace("-", "")) <= ABBREVIATION_LETTERS and n >= ABBREVIATION_REPEATS and n > lower[w.lower()]
+    )
+
+
+def _signs(text: str) -> str:
+    """Signs of a formula said as words. A hyphen between numbers is a range and stays,
+    unless the formula has other signs or a variable; a `+` before a vowel is a stress
+    mark; a sign with nothing to join is not read."""
+
+    def formula(m: re.Match[str]) -> str:
+        part = m.group()
+        if not re.search(r"[−+=×*÷≈≠<>≤≥]|(?<!\w)[a-z](?!\w)", part):
+            return part
+        return " ".join(re.sub(r"([-−+=×*÷≈≠<>≤≥])", lambda s: f" {SIGNS[s.group(1)]} ", part).split())
+
+    text = FORMULA.sub(formula, text)
+    text = WORD_SIGN.sub(lambda m: f" {SIGNS[m.group(1) or m.group()]} ", text)
+    # `+5 °C`, but not a phone number: the rules read `+7 999 123-45-67` themselves
+    text = re.sub(r"(?<![\w+])\+(?=\d)(?![\d\s()-]{7})", "плюс ", text)
+    return re.sub(r"\s*(?<!\S)[+=](?!\S)\s*", " ", text).strip()
 
 
 def _rules(text: str) -> str:
