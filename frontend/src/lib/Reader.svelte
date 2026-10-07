@@ -10,7 +10,7 @@
   let box = $state<HTMLElement>();
   let arrow = $state<SVGElement>();
   let pw = $state(0);
-  // the arrow follows the voice until the reader takes the text into their own hands
+  // the voice is lit and followed until the reader takes the text into their own hands
   let follow = $state(true);
   let now = -1;
   let shown = false;
@@ -107,7 +107,7 @@
     if (i === now) return;
     if (now >= 0) el(now)?.classList.remove('now');
     now = i;
-    if (i >= 0) el(i)?.classList.add('now');
+    if (i >= 0 && follow) el(i)?.classList.add('now');
     place();
   });
 
@@ -115,7 +115,7 @@
   $effect(() => {
     void [view, pages, lib.zoom, pw];
     void tick().then(() => {
-      if (now >= 0) el(now)?.classList.add('now');
+      if (now >= 0 && follow) el(now)?.classList.add('now');
       place(true);
     });
   });
@@ -136,8 +136,28 @@
 
   function off() {
     follow = false;
+    if (now >= 0) el(now)?.classList.remove('now');
     arrow?.classList.add('off');
   }
+
+  // play after a pause, a skip, the scrub or a chapter sends the voice on: the text goes back to it
+  let was: { t: number; w: number; on: boolean } | null = null;
+  $effect(() => {
+    const t = lib.at(id),
+      on = lib.playing && lib.cur === id,
+      w = performance.now(),
+      p = was;
+    was = { t, w, on };
+    if (follow || !p) return;
+    const drift = t - p.t - (p.on ? ((w - p.w) / 1000) * lib.speed : 0);
+    if ((on && !p.on) || Math.abs(drift) > 1) {
+      follow = true;
+      moved = false;
+      shown = false;
+      if (now >= 0) el(now)?.classList.add('now');
+      place();
+    }
+  });
 
   // a picture above pushes the text down once it loads: put the arrow back, and the voice in view
   function loaded() {
