@@ -89,6 +89,7 @@ button:disabled {
 }
 .w {
   display: inline-block;
+  max-width: 100%;
   overflow: hidden;
   vertical-align: top;
   padding-bottom: 0.09em;
@@ -96,6 +97,46 @@ button:disabled {
 }
 .wi {
   display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: top;
+  padding-bottom: 0.09em;
+  margin-bottom: -0.09em;
+}
+/* a title the smallest size does not fit: three lines and an ellipsis; a name in a list or a chapter: two */
+.ttl,
+.rd h3,
+.prd h3,
+.row h3,
+.dc h3,
+.chl button span:nth-child(2) {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* room for most of Д and Щ below a line this tight, short of the caps of the line hidden under it */
+.ttl,
+.rd h3,
+.prd h3,
+.row h3,
+.dc h3 {
+  padding-bottom: 0.04em;
+  margin-bottom: -0.04em;
+}
+/* this face hangs `_` below a line this tight: lifted onto the baseline it is not cut off */
+.us {
+  position: relative;
+  top: -0.1em;
+}
+.row h3,
+.dc h3,
+.chl button span:nth-child(2) {
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
 }
 
 /* phone: the whole screen */
@@ -1321,6 +1362,7 @@ button.pill:active {
 }
 .dc {
   position: relative;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 8px;

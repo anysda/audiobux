@@ -1,4 +1,7 @@
 // Words are never broken: a title that does not fit gets a smaller size instead.
+// A word glued from parts (a file name) may wrap after its `_`, `-` and `.`; a part still too wide ends in an ellipsis.
+export const words = (text: string) => text.split(/\s+/).filter(Boolean).map((w) => w.split(/(?<=[_.-])(?=.)/));
+
 export interface Fit {
   text: string;
   max: number;
@@ -13,20 +16,24 @@ export function fit(el: HTMLElement, o: Fit) {
   const run = () => {
     let s = o.max;
     el.style.fontSize = s + 'px';
+    // measured unclamped: the clamp would hide the lines that call for a smaller size
+    el.style.display = 'block';
     const W = el.clientWidth;
-    const words = [...el.querySelectorAll<HTMLElement>('.w')];
-    const wide = () => words.some((w) => w.offsetWidth > W + 0.5) || el.scrollWidth > W + 0.5;
+    const own = () => el.offsetHeight - parseFloat(getComputedStyle(el).paddingBottom);
+    const parts = [...el.querySelectorAll<HTMLElement>('.wi')];
+    const wide = () => parts.some((w) => w.scrollWidth > W + 0.5) || el.scrollWidth > W + 0.5;
     const tall = () => {
-      if (o.lines && el.offsetHeight > s * 0.86 * o.lines + 4) return true;
+      if (o.lines && own() > s * 0.86 * o.lines + 4) return true;
       const h = o.height?.();
       const box = el.parentElement;
       if (!h || !box) return false;
       // by layout, not scrollHeight: a neighbour moving in on a transform must not shrink the title
       const kids = [...box.children] as HTMLElement[];
       const gap = parseFloat(getComputedStyle(box).rowGap) || 0;
-      return kids.reduce((a, k) => a + k.offsetHeight, 0) + gap * (kids.length - 1) > h;
+      return kids.reduce((a, k) => a + (k === el ? own() : k.offsetHeight), 0) + gap * (kids.length - 1) > h;
     };
     while (s > o.min && (wide() || tall())) el.style.fontSize = (s -= 2) + 'px';
+    el.style.display = '';
   };
   const ro = new ResizeObserver(run);
   if (el.parentElement) ro.observe(el.parentElement);
