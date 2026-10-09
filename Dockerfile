@@ -1,15 +1,14 @@
-# One image for both processes: the worker with the pipeline on the card, and the
-# web process, which needs none of it but FastAPI. CUDA comes from wheels only, the driver
-# from the NVIDIA runtime, so the base is plain Ubuntu. torch brings CUDA 13;
-# llama.cpp and CTranslate2 are built for 12 and need its cudart and cuBLAS beside
-# (NCCL keeps one soname for both). torch on CUDA 12 instead makes the image about 1 GB
-# larger: its own wheels for 12 are bigger than these two.
+# Two images, one per process. The web one is FastAPI and the built interface. The
+# worker one is the pipeline with what it imports to start, ffmpeg and djvulibre:
+# torch with CUDA, F5-TTS, faster-whisper, RUAccent and llama-server, some 4 GB, it
+# installs into the data folder on its first start (pylock.runtime.toml, runtime.py),
+# the way it fetches the models. The driver comes from the NVIDIA runtime.
 
-FROM ghcr.io/ggml-org/llama.cpp:server-cuda-b12063 AS llama
+FROM ghcr.io/astral-sh/uv:0.12.7 AS uv
 
 # ffmpeg with its own codecs only: the m4b wants aac, loudnorm and the mp4 muxer.
-# Ubuntu's ffmpeg brings SDL, Mesa and LLVM along (some 200 MB) for playback.
-FROM ubuntu:24.04 AS ffmpeg
+# Debian's ffmpeg brings SDL, Mesa and LLVM along (some 200 MB) for playback.
+FROM python:3.12.16-slim-trixie AS ffmpeg
 ARG FFMPEG=7.1.5
 RUN apt-get update \
  && apt-get install -y --no-install-recommends build-essential ca-certificates curl nasm xz-utils zlib1g-dev \
@@ -28,50 +27,58 @@ RUN npm ci --no-audit --no-fund
 COPY frontend ./
 RUN npm run build
 
-FROM ubuntu:24.04
+FROM python:3.12.16-alpine3.24 AS web-build
+COPY --from=uv /uv /usr/local/bin/
+WORKDIR /src
+COPY pyproject.toml pylock.web.toml ./
+COPY audiobux ./audiobux
+RUN uv venv -q /opt/venv \
+ && uv pip install -q -p /opt/venv --no-cache -r pylock.web.toml \
+ && uv pip install -q -p /opt/venv --no-cache --no-deps . \
+ && find /opt/venv -name __pycache__ -prune -exec rm -rf {} +
 
-ARG NVIDIA=/opt/venv/lib/python3.12/site-packages/nvidia
-ENV DEBIAN_FRONTEND=noninteractive \
+FROM python:3.12.16-alpine3.24 AS web
+COPY --from=web-build /opt/venv /opt/venv
+COPY --from=frontend /frontend/dist /app/static
+ENV PATH=/opt/venv/bin:$PATH \
     PYTHONUNBUFFERED=1 \
-    PATH=/opt/venv/bin:/opt/llama:$PATH \
-    LD_LIBRARY_PATH=/opt/llama:$NVIDIA/cuda_runtime/lib:$NVIDIA/cublas/lib:$NVIDIA/nccl/lib \
-    NVIDIA_DRIVER_CAPABILITIES=compute,utility \
+    PYTHONDONTWRITEBYTECODE=1 \
     AUDIOBUX_DATA=/data \
-    HF_HOME=/data/models/hf \
-    AUDIOBUX_VOICE=/app/voice/m1.wav
+    AUDIOBUX_FRONTEND=/app/static
+CMD ["audiobux", "web"]
 
+# PyMuPDF's layout analysis is half the package, and nothing here calls it, nor its
+# headers or NumPy's own tests.
+# EnCodec, which the vocoder imports, comes as source only: it is built here, its
+# requirements are the runtime's.
+FROM python:3.12.16-slim-trixie AS worker-build
+COPY --from=uv /uv /usr/local/bin/
+WORKDIR /src
+COPY pyproject.toml pylock.worker.toml ./
+COPY audiobux ./audiobux
+RUN uv venv -q /opt/venv \
+ && uv pip install -q -p /opt/venv --no-cache -r pylock.worker.toml \
+ && uv pip install -q -p /opt/venv --no-cache --no-deps encodec==0.1.1 . \
+ && rm -rf /opt/venv/lib/python3.12/site-packages/pymupdf/layout /opt/venv/lib/python3.12/site-packages/pymupdf/mupdf-devel \
+ && find /opt/venv/lib/python3.12/site-packages/numpy -name tests -prune -exec rm -rf {} + \
+ && find /opt/venv -name __pycache__ -prune -exec rm -rf {} +
+
+FROM python:3.12.16-slim-trixie AS worker
 RUN apt-get update \
- && apt-get install -y --no-install-recommends python3 python3-venv djvulibre-bin libgomp1 tzdata \
- && rm -rf /var/lib/apt/lists/* \
- && python3 -m venv /opt/venv
-
+ && apt-get install -y --no-install-recommends djvulibre-bin libgomp1 tzdata \
+ && rm -rf /var/lib/apt/lists/*
 COPY --from=ffmpeg /out/usr/local/bin/ffmpeg /out/usr/local/bin/ffprobe /usr/local/bin/
 COPY --from=ffmpeg /out/usr/local/lib/ /usr/local/lib/
-COPY --from=llama /app/llama-server /app/libllama-server-impl.so /app/libllama-common.so.0 /app/libmtmd.so.0 \
-     /app/libllama.so.0 /app/libggml.so.0 /app/libggml-base.so.0 /app/libggml-cuda.so /app/libggml-cpu-*.so /opt/llama/
 RUN ldconfig
-
-WORKDIR /app
-COPY pyproject.toml ./
-# F5-TTS without its own requirements: they are the trainer's and the demo's (gradio,
-# wandb, datasets, accelerate, bitsandbytes); what inference imports is in `.[f5]`.
-# Its model package imports the trainer on load; that line goes. Triton is for
-# torch.compile, which nothing here calls.
-RUN mkdir audiobux && touch audiobux/__init__.py \
- && pip install --no-cache-dir ".[f5,web]" torch==2.15.0 torchaudio==2.11.1 torchcodec==0.17.0 \
-      nvidia-cuda-runtime-cu12==12.9.* nvidia-cublas-cu12==12.9.* \
- && pip install --no-cache-dir --no-deps f5-tts==1.1.22 \
- && sed -i '/^from f5_tts.model.trainer import Trainer$/d' /opt/venv/lib/python3.12/site-packages/f5_tts/model/__init__.py \
- && pip uninstall -y triton
-# RUAccent fetches its parser into its own package folder on first load, and the
-# processes do not run as root: the parser comes with the image instead.
-RUN python -c "import pathlib, ruaccent; from huggingface_hub import snapshot_download; \
-snapshot_download('ruaccent/accentuator', revision='b78ae5ea1e62beaf138bed1865cd8c3b0b5ca855', allow_patterns=['koziev/*'], local_dir=pathlib.Path(ruaccent.__file__).parent)"
-COPY voice ./voice
-COPY audiobux ./audiobux
-RUN pip install --no-cache-dir --no-deps .
-COPY --from=frontend /frontend/dist ./static
-ENV AUDIOBUX_FRONTEND=/app/static
-
+COPY --from=worker-build /opt/venv /opt/venv
+COPY voice /app/voice
+COPY pylock.runtime.toml /app/
+ENV PATH=/opt/venv/bin:$PATH \
+    PYTHONUNBUFFERED=1 \
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility \
+    AUDIOBUX_DATA=/data \
+    AUDIOBUX_RUNTIME=/app/pylock.runtime.toml \
+    AUDIOBUX_VOICE=/app/voice/m1.wav \
+    HF_HOME=/data/models/hf
 VOLUME /data
 CMD ["audiobux", "worker"]

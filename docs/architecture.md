@@ -2,7 +2,7 @@
 
 ## Процессы
 
-Один образ, три контейнера (`compose.yaml`):
+Три контейнера (`compose.yaml`), у web и worker по своему образу из одного `Dockerfile`:
 
 ```
  браузер
@@ -21,9 +21,11 @@
                                              +--------------------------+
 ```
 
-**worker** (`audiobux worker`). Держит очередь в SQLite, качает модели,
-озвучивает книги по одной, работает с картой. Портов наружу нет. Видит весь
-каталог данных. Книгу открывает только он.
+**worker** (`audiobux worker`). Держит очередь в SQLite, при первом запуске ставит
+рантайм моделей (torch с CUDA, F5, faster-whisper, RUAccent, llama-server) в
+`runtime/` и качает модели; книги, принятые до того, ждут. Озвучивает книги по
+одной, работает с картой. Портов наружу нет. Видит весь каталог данных. Книгу
+открывает только он.
 
 **web** (`audiobux web`). Отдаёт интерфейс и API. Книг не разбирает и моделей
 не видит: из каталога данных у него только `incoming/` (сюда пишет загрузки),
@@ -181,7 +183,7 @@ Hugging Face и sha256 каждого файла. Список файлов за
 | RUAccent `turbo3.1` | ударения | `models/ruaccent` |
 
 Языковая модель работает в
-одном `llama-server` (из образа llama.cpp) на распознавание, рисунки и текст,
+одном `llama-server` (выпуск llama.cpp b12063 для CUDA 12, ставится в `runtime/`) на распознавание, рисунки и текст,
 8 запросов параллельно, контекст 8192; сервер живёт только пока шаг им
 пользуется.
 
@@ -199,6 +201,7 @@ AUDIOBUX_DATA/
   work/<id>/             промежуточные файлы конвейера, удаляются после публикации
   work/<id>.upload       загрузка, которую worker сейчас принимает
   models/                модели; hf/, whisper/, ruaccent/, .fetched/
+  runtime/<хеш>/         рантайм моделей по pylock.runtime.toml: site/, llama/
   run/worker.sock        сокет worker
   web/listening.db       позиции и отметки «прослушано» (пишет только web)
 ```
@@ -237,11 +240,12 @@ AUDIOBUX_DATA/
 
 Все переменные `AUDIOBUX_*` и их значения в коде (`audiobux/config.py`).
 `compose.yaml` передаёт контейнерам только `DATA`, `TTS`, `QUIET_HOURS`, `TZ`,
-`COVER_URL`, `HOSTS` и `UPLOAD_MB`; `DATA`, `VOICE` и `FRONTEND` задаёт ещё и `Dockerfile`, остальные действуют со значением из кода.
+`COVER_URL`, `HOSTS` и `UPLOAD_MB`; `DATA`, `VOICE`, `RUNTIME` и `FRONTEND` задаёт ещё и `Dockerfile`, остальные действуют со значением из кода.
 
 | Переменная | По умолчанию в коде | Что задаёт |
 |---|---|---|
 | `AUDIOBUX_DATA` | `data` (в образе `/data`) | каталог данных |
+| `AUDIOBUX_RUNTIME` | пусто = рантайм уже в окружении (в образе worker `/app/pylock.runtime.toml`) | lock-файл рантайма моделей, который worker ставит в `<data>/runtime/` |
 | `AUDIOBUX_SOCKET` | пусто = `<data>/run/worker.sock` | сокет worker |
 | `AUDIOBUX_QUIET_HOURS` | пусто = круглые сутки | тихие часы |
 | `AUDIOBUX_TZ` | `Europe/Moscow` | часовой пояс тихих часов |

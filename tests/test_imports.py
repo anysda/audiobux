@@ -99,6 +99,13 @@ def test_models_stay_inside() -> None:
         assert not [m for m in reached if is_format(m)], name
 
 
+def test_the_runtime_stands_alone() -> None:
+    """It is installed before anything else of the worker can import what it brings."""
+    known, edges = modules(), graph()
+    assert not reach(edges, "runtime")
+    assert imports("runtime", known["runtime"])[1] <= sys.stdlib_module_names | {"requests"}
+
+
 def test_formats_know_nothing_of_models_and_steps() -> None:
     edges = graph()
     readers = [m for m in edges if is_format(m)]

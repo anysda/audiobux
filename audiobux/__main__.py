@@ -66,9 +66,16 @@ def context(settings: Settings) -> "Context":
 def voice_one(settings: Settings, file: Path, until: str | None, out: Path | None) -> None:
     from . import pipeline
     from .book import Book
+    from .runtime import Runtime
 
     if until and until not in [s.name for s in pipeline.STEPS]:
         sys.exit(f"--until: one of {', '.join(s.name for s in pipeline.STEPS)}")
+    # the worker takes books while it installs the runtime (see `fetch`); one book waits for it
+    if settings.runtime:
+        runtime = Runtime(Path(settings.runtime), settings.data / "runtime")
+        if not runtime.ready:
+            runtime.install()
+        runtime.activate()
     book = Book.create(settings.work, file.name, lambda p: shutil.copyfile(file, p))
     result = pipeline.run(book, context(settings), until)
     print(book.dir)

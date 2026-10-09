@@ -32,6 +32,9 @@ class Settings:
     hosts: str = ""
     # the built interface the web process serves; nothing is served when it is not there
     frontend: Path = Path("frontend/dist")
+    # the lock of what the models run on, installed into <data>/runtime on the first start
+    # (see `runtime`); empty means it is all in this Python already
+    runtime: str = ""
 
     @property
     def incoming(self) -> Path:
@@ -90,4 +93,5 @@ class Settings:
             upload_mb=int(get("upload_mb", d.upload_mb)),
             hosts=get("hosts", d.hosts),
             frontend=Path(get("frontend", d.frontend)),
+            runtime=get("runtime", d.runtime),
         )

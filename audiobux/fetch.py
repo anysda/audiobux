@@ -30,6 +30,7 @@ from tqdm import tqdm
 from . import f5, takes
 from .config import Settings
 from .llm import hub_file
+from .runtime import Runtime
 
 log = logging.getLogger(__name__)
 
@@ -149,9 +150,16 @@ def revision(repo: str) -> str | None:
 
 
 def whisper_repo(asr: str) -> str:
-    """The repo faster-whisper takes a model of this size or name from."""
-    from faster_whisper.utils import _MODELS
-
+    """The repo faster-whisper takes a model of this size or name from. A pinned one is
+    known without faster-whisper, which may not be installed yet (see `runtime`); one
+    outside the pins has no revision to ask for either way."""
+    pinned = [repo for repo in PINS if repo.endswith("/faster-whisper-" + asr)]
+    if pinned:
+        return pinned[0]
+    try:
+        from faster_whisper.utils import _MODELS
+    except ModuleNotFoundError:
+        return asr
     return str(_MODELS.get(asr, asr))
 
 
@@ -323,7 +331,9 @@ def _accent(size: str, workdir: Path) -> list[Source]:
 
 
 class Fetch:
-    """Fetches what `needed` lists in a thread of its own, trying again after a failure."""
+    """Installs the runtime the models run on, then fetches what `needed` lists, in a
+    thread of its own, trying again after a failure. What the models need is known only
+    with the runtime in place: RUAccent tells it."""
 
     def __init__(
         self,
@@ -333,9 +343,12 @@ class Fetch:
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self.hub = hub or HuggingFace()
-        self.notes = settings.models / ".fetched"
+        self.settings, self.notes = settings, settings.models / ".fetched"
         self.on_ready, self.sleep = on_ready, sleep
-        self.pending = [s for s in needed(settings) if not self._noted(s)]
+        self.runtime = Runtime(Path(settings.runtime), settings.data / "runtime") if settings.runtime else None
+        if self.runtime and self.runtime.ready:
+            self.runtime.activate()
+        self.pending = self._pending() if self._installed else []
         # bytes in place and bytes in all, once the files are known
         self.done = 0
         self.total: int | None = None
@@ -343,21 +356,36 @@ class Fetch:
         self._thread: threading.Thread | None = None
 
     @property
+    def _installed(self) -> bool:
+        return self.runtime is None or self.runtime.ready
+
+    @property
     def ready(self) -> bool:
-        return not self.pending
+        return self._installed and not self.pending
 
     def progress(self) -> tuple[int | None, int | None]:
-        """(done, total) bytes while fetching, else (None, None)."""
-        if self.ready or self.total is None:
+        """(done, total) bytes while installing and fetching, else (None, None); the
+        runtime's bytes count in, ahead of the models'."""
+        r = self.runtime
+        if self.ready:
             return None, None
-        return min(self.done + self._part, self.total), self.total
+        if r and not r.ready:
+            return (None, None) if r.total is None else (r.done, r.total)
+        if self.total is None:
+            return None, None
+        ahead = (r.total or 0) if r else 0
+        return ahead + min(self.done + self._part, self.total), ahead + self.total
 
     def start(self) -> None:
-        if self.pending and self._thread is None:
+        if not self.ready and self._thread is None:
             self._thread = threading.Thread(target=self.run, name="fetch", daemon=True)
             self._thread.start()
 
     def run(self) -> None:
+        if self.runtime and not self.runtime.ready:
+            self._again(self.runtime.install)
+            self.runtime.activate()
+            self.pending = self._pending()
         plan = self._again(self._plan)
         self.done = sum(size for files in plan.values() for _, size, there in files if there)
         self.total = sum(size for files in plan.values() for _, size, _ in files)
@@ -370,6 +398,9 @@ class Fetch:
             self.pending.remove(source)
         log.info("models: all in place")
         self.on_ready()
+
+    def _pending(self) -> list[Source]:
+        return [s for s in needed(self.settings) if not self._noted(s)]
 
     def _plan(self) -> dict[Source, list[tuple[File, int, bool]]]:
         plan: dict[Source, list[tuple[File, int, bool]]] = {}
@@ -431,7 +462,7 @@ class Fetch:
             except Exception as e:
                 pause = PAUSES[min(failures, len(PAUSES) - 1)]
                 failures += 1
-                log.warning("models: %s: %s, again in %d s", type(e).__name__, e, pause)
+                log.warning("fetch: %s: %s, again in %d s", type(e).__name__, e, pause)
                 self.sleep(pause)
 
     def _noted(self, source: Source) -> bool:
