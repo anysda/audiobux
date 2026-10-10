@@ -1,13 +1,10 @@
 from datetime import datetime
-from zoneinfo import ZoneInfo
 
 import pytest
 from conftest import stories
 
 from audiobux import chunk
 from audiobux.quiet import QuietHours
-
-MSK = ZoneInfo("Europe/Moscow")
 
 
 def seconds(text):
@@ -57,22 +54,44 @@ def test_bounds_inside_a_piece_keep_their_kind():
     assert parts == [("Он пришёл, сел. Тихо.", [[1, "comma"], [2, "stop"]], "stop")]
 
 
-def test_quiet_hours_inside_and_outside():
-    night = QuietHours("00:00-08:00", "Europe/Moscow")
-    assert night.seconds_left(datetime(2026, 11, 2, 23, 59, tzinfo=MSK)) == 0
-    assert night.seconds_left(datetime(2026, 11, 2, 0, 0, tzinfo=MSK)) == 8 * 3600
-    assert night.seconds_left(datetime(2026, 11, 2, 7, 59, 30, tzinfo=MSK)) == 30
-    assert night.seconds_left(datetime(2026, 11, 2, 8, 0, tzinfo=MSK)) == 0
-    # the zone is honoured: 21:30 UTC is 00:30 in Moscow
-    assert night.seconds_left(datetime(2026, 11, 2, 21, 30, tzinfo=ZoneInfo("UTC"))) == 7.5 * 3600
+def at(hour, minute=0, second=0):
+    return datetime(2026, 11, 2, hour, minute, second)
 
 
-def test_quiet_hours_across_midnight_and_off():
-    late = QuietHours("22:00-06:00", "Europe/Moscow")
-    assert late.seconds_left(datetime(2026, 11, 2, 23, 0, tzinfo=MSK)) == 7 * 3600
-    assert late.seconds_left(datetime(2026, 11, 2, 12, 0, tzinfo=MSK)) == 0
-    assert QuietHours("").seconds_left() == 0, "empty: round the clock"
-    assert QuietHours("  ").seconds_left(datetime(2026, 11, 2, 3, 0, tzinfo=MSK)) == 0
+def test_quiet_hours_through_midnight_run_by_the_server_clock():
+    night = QuietHours("00:00-08:00")
+    night.clock = lambda: at(0, 0)
+    assert night.seconds_left() == 8 * 3600, "the start is inside"
+    night.clock = lambda: at(23, 59, 59)
+    assert night.seconds_left() == 0
+    night.clock = lambda: at(7, 59, 30)
+    assert night.seconds_left() == 30
+    night.clock = lambda: at(8, 0)
+    assert night.seconds_left() == 0, "the end is outside"
+
+
+def test_quiet_hours_across_midnight():
+    late = QuietHours("22:00-06:00")
+    assert late.seconds_left(at(21, 59, 59)) == 0
+    assert late.seconds_left(at(22, 0)) == 8 * 3600
+    assert late.seconds_left(at(23, 0)) == 7 * 3600
+    assert late.seconds_left(at(0, 0)) == 6 * 3600
+    assert late.seconds_left(at(5, 59)) == 60
+    assert late.seconds_left(at(6, 0)) == 0
+    assert late.seconds_left(at(12, 0)) == 0
+
+
+def test_empty_quiet_hours_mean_round_the_clock():
+    for spec in ("", "  "):
+        quiet = QuietHours(spec)
+        quiet.clock = lambda: at(3, 0)
+        assert quiet.seconds_left() == 0
+        assert quiet.check() == 0
+
+
+def test_a_wrong_window_is_told_plainly():
+    with pytest.raises(ValueError, match="HH:MM-HH:MM"):
+        QuietHours("ночью")
 
 
 @pytest.mark.parametrize("spec", ["22-06", "22:00", "24:00-06:00", "22:60-06:00", "08:00-08:00", "8:00-9:00"])

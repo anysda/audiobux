@@ -13,7 +13,6 @@ import re
 import threading
 from collections.abc import Callable
 from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
 
 log = logging.getLogger(__name__)
 
@@ -21,9 +20,8 @@ SPEC = re.compile(r"(\d\d):(\d\d)-(\d\d):(\d\d)")
 
 
 class QuietHours:
-    def __init__(self, spec: str, tz: str = "Europe/Moscow") -> None:
+    def __init__(self, spec: str) -> None:
         self.spec = spec.strip()
-        self.tz = ZoneInfo(tz)
         self.start: int | None = None
         self.end: int | None = None
         if self.spec:
@@ -32,7 +30,8 @@ class QuietHours:
             if max(h1, h2) > 23 or max(m1, m2) > 59 or (h1, m1) == (h2, m2):
                 raise ValueError("quiet hours are HH:MM-HH:MM, two different times of the day")
             self.start, self.end = h1 * 60 + m1, h2 * 60 + m2
-        self.clock: Callable[[], datetime] = lambda: datetime.now(self.tz)
+        # the server's local time: the time zone is set on the machine, not here
+        self.clock: Callable[[], datetime] = datetime.now
         self._wake = threading.Event()
         self.sleep: Callable[[float], None] = self._nap
         self.on_check: Callable[[], None] | None = None
@@ -43,7 +42,7 @@ class QuietHours:
         """Seconds until the window ends, 0 if we are outside it."""
         if self.start is None or self.end is None:
             return 0.0
-        now = (now or self.clock()).astimezone(self.tz)
+        now = now or self.clock()
         minute = now.hour * 60 + now.minute
         # a window across midnight is all but the day between its end and its start
         inside = self.start <= minute < self.end if self.start < self.end else not self.end <= minute < self.start

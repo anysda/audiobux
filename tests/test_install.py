@@ -45,3 +45,12 @@ def test_a_setting_from_env_reaches_the_process_that_reads_it():
 
 def test_the_card_works_round_the_clock_unless_told_otherwise():
     assert re.search(r"^AUDIOBUX_QUIET_HOURS=$", (ROOT / ".env.example").read_text(), re.M)
+
+
+def test_the_time_zone_is_the_hosts():
+    """Quiet hours run by the server clock: no setting of its own, the host's zone in both processes."""
+    texts = [(ROOT / p).read_text() for p in ("compose.yaml", ".env.example", "README.md", "docs/architecture.md")]
+    assert not [t for t in texts if "AUDIOBUX_TZ" in t]
+    services = yaml.safe_load(texts[0])["services"]
+    for service in ("worker", "web"):
+        assert "/etc/localtime:/etc/localtime:ro" in services[service]["volumes"], service

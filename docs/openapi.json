@@ -1456,10 +1456,6 @@
             ],
             "title": "Window"
           },
-          "tz": {
-            "type": "string",
-            "title": "Tz"
-          },
           "active": {
             "type": "boolean",
             "title": "Active"
@@ -1468,7 +1464,6 @@
         "type": "object",
         "required": [
           "window",
-          "tz",
           "active"
         ],
         "title": "Quiet"

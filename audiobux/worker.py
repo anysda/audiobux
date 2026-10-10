@@ -350,7 +350,7 @@ class Worker:
             models=contract.Models(ready=self.fetch.ready, done=done, total=total),
             card=card(),
             queue=self.library.queue(),
-            quiet=contract.Quiet(window=quiet.spec or None, tz=self.settings.tz, active=bool(quiet.seconds_left())),
+            quiet=contract.Quiet(window=quiet.spec or None, active=bool(quiet.seconds_left())),
             formats=[contract.Format(name=k.name, extensions=list(k.extensions)) for k in formats.KINDS],
         )
 

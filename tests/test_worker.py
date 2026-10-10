@@ -526,7 +526,7 @@ def test_status_and_events(served, chekhov_epub):
     path = served.settings.worker_socket
     status = contract.call(path, "status.read")
     assert status["queue"] == 0 and status["models"]["ready"] is True
-    assert status["quiet"] == {"window": None, "tz": "Europe/Moscow", "active": False}
+    assert status["quiet"] == {"window": None, "active": False}
     kinds = {f["name"]: f["extensions"] for f in status["formats"]}
     assert ".epub" in kinds["epub"] and ".pdf" in kinds["pdf"] and ".djvu" in kinds["djvu"]
     assert status["card"] is None or set(status["card"]) == {"name", "memory_used", "memory_total", "load"}
@@ -626,7 +626,7 @@ def test_the_queue_waits_for_the_models(tmp_path, chekhov_epub, monkeypatch):
 def test_quiet_hours_in_the_status(tmp_path):
     clock = Clock(datetime(2026, 11, 3, 1, 0, tzinfo=MSK))
     w = make(tmp_path, quiet=QuietHours("22:00-06:00"), clock=clock)
-    assert w.status()["quiet"] == {"window": "22:00-06:00", "tz": "Europe/Moscow", "active": True}
+    assert w.status()["quiet"] == {"window": "22:00-06:00", "active": True}
 
 
 def subscriber(w: Worker):

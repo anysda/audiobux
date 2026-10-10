@@ -141,7 +141,6 @@ class Card(TypedDict):
 class Quiet(TypedDict):
     # HH:MM-HH:MM, null when the card works round the clock
     window: str | None
-    tz: str
     active: bool
 
 

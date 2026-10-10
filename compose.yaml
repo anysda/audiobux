@@ -27,12 +27,13 @@ services:
       AUDIOBUX_DATA: /data
       AUDIOBUX_TTS: f5
       AUDIOBUX_QUIET_HOURS: ${AUDIOBUX_QUIET_HOURS:-}
-      AUDIOBUX_TZ: ${AUDIOBUX_TZ:-Europe/Moscow}
       AUDIOBUX_COVER_URL: http://cover:8080
     # models are downloaded when the worker starts; covers are asked of the cover service
     networks: [default, cover_in]
     volumes:
       - ${AUDIOBUX_DATA:-./data}:/data
+      # quiet hours and the log run by the host's clock and time zone
+      - /etc/localtime:/etc/localtime:ro
     healthcheck:
       test: ["CMD", "test", "-S", "/data/run/worker.sock"]
       interval: 10s
@@ -71,6 +72,7 @@ services:
       - ${AUDIOBUX_DATA:-./data}/library:/data/library:ro
       - ${AUDIOBUX_DATA:-./data}/run:/data/run
       - ${AUDIOBUX_DATA:-./data}/web:/data/web
+      - /etc/localtime:/etc/localtime:ro
 
   # Cover search on the web, isolated: author and title in, image bytes out.
   # No secrets, no volumes, no GPU; outside network only. The finder goes only to the
