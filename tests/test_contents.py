@@ -237,3 +237,18 @@ def test_the_file_name_is_no_chapter_title():
     assert (
         reading.titles(untitled | {"title": "Хононов - Изучаем DDD"}, "Хононов - Изучаем DDD.pdf")[0] == "Изучаем DDD"
     )
+
+
+def test_the_cleaned_file_name_is_no_chapter_title():
+    untitled = {"chapters": [{"title": ""}, {"title": ""}]}
+    for title, name in [
+        ("scan 0042", "scan_0042.pdf"),
+        ("Книга", "Книга_2019_12MB.pdf"),
+        ("Книга_2019_12MB", "Книга_2019_12MB.pdf"),
+        ("", "Книга (2019, 600M).djvu"),
+        ("2019", "2019.pdf"),
+    ]:
+        assert reading.titles(untitled | {"title": title}, name) == ["", ""], name
+    assert reading.titles(untitled | {"title": "Изучаем DDD"}, "Книга_2019_12MB.pdf") == ["Изучаем DDD", ""]
+    named = reading.titles(untitled | {"title": "Книга"}, "Хононов_-_Книга_2019.pdf")
+    assert named == ["Книга", ""]

@@ -14,7 +14,7 @@ import numpy as np
 import soundfile as sf
 from rapidfuzz.distance import Levenshtein
 
-from . import chunk, cover, epub, figures, formats, m4b, reading, speech, sync, takes
+from . import chunk, cover, epub, figures, formats, m4b, reading, speech, sync, takes, titlepage
 from .book import Book
 from .config import Settings
 from .formats.pages import from_pages, top_levels
@@ -47,9 +47,12 @@ def extract_text(book: Book, ctx: Context) -> None:
     for name, image in (("cover.jpg", doc.cover), ("page1.jpg", doc.first_page)):
         if image:
             book.path(name).write_bytes(image)
-    title = doc.title or Path(book.name).stem
-    cover.ensure(book.dir, doc.author, title, book.name)
-    data = {"title": title, "author": doc.author, "outline": doc.outline}
+    try:
+        title, author = titlepage.find(doc, book.source, book.name, ctx.models.llm, ctx.quiet.wait)
+    finally:
+        ctx.models.release_llm()
+    cover.ensure(book.dir, author, title, book.name)
+    data = {"title": title, "author": author, "outline": doc.outline}
     if doc.pages:
         book.write("scan.json", data | {"pages": doc.pages})
     else:

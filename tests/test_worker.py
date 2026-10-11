@@ -202,7 +202,7 @@ def test_a_book_without_a_title_takes_the_one_it_came_with(tmp_path, chekhov_pdf
     book_id = w.submit(upload(w, chekhov_pdf), "Чехов - Рассказы")["id"]
     assert state(w, book_id)["title"] == "Чехов - Рассказы", "the list shows it while the book waits"
     w.run(until_idle=True)
-    assert state(w, book_id)["title"] == "Чехов - Рассказы"
+    assert (state(w, book_id)["title"], state(w, book_id)["author"]) == ("Рассказы", "Чехов")
 
 
 def test_books_are_voiced_in_the_order_they_came(tmp_path, chekhov_epub, chekhov_pdf):

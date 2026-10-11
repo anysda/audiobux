@@ -7,7 +7,7 @@ one, `fetch` is asked by author and title; nothing found, the first page will do
 
 from pathlib import Path
 
-from . import webcover
+from . import titlepage, webcover
 
 
 def ensure(folder: Path, author: str, title: str, name: str) -> None:
@@ -30,10 +30,8 @@ def fetch(author: str, title: str) -> bytes | None:
 
 
 def who_and_what(author: str, title: str, name: str) -> tuple[str, str]:
-    """Author and title: the book's metadata, or a file named `Автор - Название`."""
-    stem = Path(name).stem
-    if not author and " - " in stem:
-        author, rest = stem.split(" - ", 1)
-        if not title or title == stem:
-            title = rest
-    return author.strip(), (title or stem).strip()
+    """Author and title: the book's own, or what the name of the file says."""
+    named_title, named_author = titlepage.from_name(name)
+    if not title or title == Path(name).stem:
+        title = named_title
+    return (author or named_author).strip(), title.strip()

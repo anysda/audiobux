@@ -17,6 +17,7 @@ from typing import Any
 
 from rapidfuzz import fuzz
 
+from . import titlepage
 from .cover import who_and_what
 
 log = logging.getLogger(__name__)
@@ -48,7 +49,7 @@ def titles(data: dict[str, Any], name: str) -> list[str]:
     first chapter is named after the book, a later one stays untitled. The bare name
     of the file is no title."""
     _, title = who_and_what(data.get("author", ""), data.get("title", ""), name)
-    title = "" if title == Path(name).stem else title
+    title = "" if titlepage.bare(title, name) else title
     return [c["title"] or (title if n == 0 else "") for n, c in enumerate(data["chapters"])]
 
 
