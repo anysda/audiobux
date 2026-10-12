@@ -65,7 +65,7 @@ RUN uv venv -q /opt/venv \
 
 FROM python:3.12.16-slim-trixie AS worker
 RUN apt-get update \
- && apt-get install -y --no-install-recommends djvulibre-bin libgomp1 tzdata \
+ && apt-get install -y --no-install-recommends djvulibre-bin libgomp1 \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=ffmpeg /out/usr/local/bin/ffmpeg /out/usr/local/bin/ffprobe /usr/local/bin/
 COPY --from=ffmpeg /out/usr/local/lib/ /usr/local/lib/
