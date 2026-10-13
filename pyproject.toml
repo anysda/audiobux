@@ -102,11 +102,13 @@ paths = ["audiobux"]
 # attributes set for a library that reads them: ebooklib (an item's is_linear goes
 # into the spine), sqlite3 (row_factory), requests (a session's auth) and socketserver
 # (a handler's timeout and handle, a server's daemon_threads), Starlette (a file
-# answer's max_ranges, the status_code of the answer a route fills); and the fields
+# answer's max_ranges, the status_code of the answer a route fills), the Hugging Face hub
+# (its offline switch, see fetch.offline); and the fields
 # of the answers in contract.py and web.py, which the other side of the socket and
 # of the API reads
 ignore_names = [
     "is_linear", "row_factory", "auth", "timeout", "handle", "daemon_threads", "max_ranges", "status_code",
+    "HF_HUB_OFFLINE",
     "state", "pieces_done", "pieces_total", "percent", "added", "updated", "has_epub", "has_cover",
     "memory_used", "memory_total", "window", "active", "detail", "position", "listened",
 ]

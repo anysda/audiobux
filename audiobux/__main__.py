@@ -64,7 +64,7 @@ def context(settings: Settings) -> "Context":
 
 
 def voice_one(settings: Settings, file: Path, until: str | None, out: Path | None) -> None:
-    from . import pipeline
+    from . import fetch, pipeline
     from .book import Book
     from .runtime import Runtime
 
@@ -76,6 +76,8 @@ def voice_one(settings: Settings, file: Path, until: str | None, out: Path | Non
         if not runtime.ready:
             runtime.install()
         runtime.activate()
+    # the models are the ones the worker fetched (see `fetch`), none is downloaded here
+    fetch.offline()
     book = Book.create(settings.work, file.name, lambda p: shutil.copyfile(file, p))
     result = pipeline.run(book, context(settings), until)
     print(book.dir)

@@ -1,5 +1,6 @@
 """What the models run on, installed by the worker on its first start: torch with CUDA,
-F5-TTS, faster-whisper, RUAccent and the rest of `pylock.runtime.toml`, and llama-server.
+F5-TTS, faster-whisper, RUAccent and the rest of `pylock.runtime.toml`, llama-server, and
+the parser RUAccent takes from Koziev.
 
 The image stays small; this part, some 4 GB, goes into `<data>/runtime/<hash>` beside
 the models, the hash being that of the lock and the llama-server build. Every file is
@@ -59,6 +60,46 @@ LLAMA_FILES = (
     "libggml-cpu-*.so",
     "libggml-cuda.so",
 )
+# RUAccent takes its parser from Koziev into its own package folder: its load() fetches it
+# from the hub, unpinned, whenever the folder is not there, and skips it when the folder is
+# there, whole or not. The runtime brings it, at the revision of the RUAccent models.
+ACCENT = "ruaccent/accentuator"
+ACCENT_REVISION = "b78ae5ea1e62beaf138bed1865cd8c3b0b5ca855"
+KOZIEV = tuple(
+    Download(name, f"https://huggingface.co/{ACCENT}/resolve/{ACCENT_REVISION}/{name}", size, sha256)
+    for name, size, sha256 in (
+        ("koziev/rulemma/rulemma.dat", 16703198, "bf2b3ef3ff7a0aa6e4250aa4e9c8ed568e25f825deebdb12dee1b46b785ba9fc"),
+        ("koziev/rulemma/rulemma.py", 11166, "61c0ae4ea718fc85000284dcbf798fb51657c41f3db3ae029e8bebfb33075f44"),
+        ("koziev/rupostagger/__init__.py", 111, "68f14d0db5bc92e4da7363ca6c2c34812b18a87bdfe07714329bcfd711bdbe11"),
+        (
+            "koziev/rupostagger/database/ruword2tags.db",
+            168816640,
+            "a06848e656bef642aafb4440c03554fa78f2f32dde92ea66f3f86ce9977b167e",
+        ),
+        (
+            "koziev/rupostagger/rupostagger.config",
+            276,
+            "c8c19d1cd92855bc281b36ae80c3b10ed20d7f0aeeca54467c8fd00df319c614",
+        ),
+        (
+            "koziev/rupostagger/rupostagger.model",
+            2417464,
+            "21b7b0bfd7427b5fdc1604052176db8aa3b139b3ce03be440cfce48536f8e5ef",
+        ),
+        ("koziev/rupostagger/rupostagger.py", 7118, "111b8c22db18407fb34bcd6e00b3c2245165de98ddec0fdb40862d82af864530"),
+        ("koziev/rupostagger/rusyllab.py", 18975, "331fdd0d9d10025bbebfc09ae648b21399d9f73cd168e1eeb76c10d6b0a31c00"),
+        (
+            "koziev/rupostagger/ruword2tags.dat",
+            9683765,
+            "dde47b5f1d48ff899887ac07812dcabd2966e48e84646f3065bfd06627c2af58",
+        ),
+        (
+            "koziev/rupostagger/ruword2tags.py",
+            18086,
+            "2858ad021915f3fe5bf9589ab1773f8c2cdd664f053f3f6bf317fec3fa3ed23b",
+        ),
+    )
+)
 # the CUDA 12 libraries CTranslate2 opens by name, in the order they need each other
 CUBLAS = ("cublas/lib/libcublasLt.so.12", "cublas/lib/libcublas.so.12")
 # F5-TTS's model package imports its trainer on load, and the trainer's requirements are
@@ -101,7 +142,7 @@ class Runtime:
         text = lock.read_bytes()
         self.dir = root / hashlib.sha256(text + LLAMA.sha256.encode()).hexdigest()[:16]
         self.site, self.llama = self.dir / "site", self.dir / "llama"
-        self.ready = (self.dir / "done").exists()
+        self.ready = (self.dir / "done").exists() and not self._koziev_missing()
         # bytes in place and in all, once install() has the list
         self.done = 0
         self.total: int | None = None
@@ -109,10 +150,13 @@ class Runtime:
     def install(self) -> None:
         """Downloads what is not in place yet, checks it and unpacks it; may be called again
         after a failure and goes on from there."""
-        todo = [*wheels(tomllib.loads(self.lock.read_text())), LLAMA]
         noted = self.dir / "installed"
         self.dir.mkdir(parents=True, exist_ok=True)
         installed = set(noted.read_text().split()) if noted.exists() else set()
+        # Koziev's files are in place by their bytes, whatever the note says
+        missing = self._koziev_missing()
+        installed = (installed - {d.name for d in KOZIEV}) | {d.name for d in KOZIEV if d not in missing}
+        todo = [*wheels(tomllib.loads(self.lock.read_text())), LLAMA, *KOZIEV]
         self.total = sum(d.size for d in todo)
         self.done = sum(d.size for d in todo if d.name in installed)
         log.info("runtime: %.1f of %.1f GB in place", self.done / 1e9, self.total / 1e9)
@@ -123,9 +167,13 @@ class Runtime:
             part = self._download(d)
             if d is LLAMA:
                 self._llama(part)
+            elif d in KOZIEV:
+                target = self.site / "ruaccent" / d.name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                part.replace(target)
             else:
                 self._wheel(part)
-            part.unlink()
+            part.unlink(missing_ok=True)
             with noted.open("a") as f:
                 f.write(d.name + "\n")
         (self.dir / "done").touch()
@@ -151,8 +199,21 @@ class Runtime:
             if lib.exists():
                 ctypes.CDLL(str(lib), mode=ctypes.RTLD_GLOBAL)
 
+    def _koziev_missing(self) -> list[Download]:
+        """Koziev's files not in RUAccent's package folder with the pinned bytes."""
+        missing = []
+        for d in KOZIEV:
+            path = self.site / "ruaccent" / d.name
+            if not path.is_file() or path.stat().st_size != d.size:
+                missing.append(d)
+                continue
+            with path.open("rb") as f:
+                if hashlib.file_digest(f, "sha256").hexdigest() != d.sha256:
+                    missing.append(d)
+        return missing
+
     def _download(self, d: Download) -> Path:
-        part = self.dir / (d.name + ".part")
+        part = self.dir / (d.name.replace("/", "_") + ".part")
         sha = hashlib.sha256()
         start = self.done
         try:

@@ -123,7 +123,10 @@ class Llm:
         from huggingface_hub import hf_hub_download
 
         repo, name = hub_file(spec, self.model)
-        return Path(hf_hub_download(repo, name, revision=self.revision(repo), cache_dir=self.models / "hf"))
+        where = hf_hub_download(
+            repo, name, revision=self.revision(repo), cache_dir=self.models / "hf", local_files_only=True
+        )
+        return Path(where)
 
 
 def hub_file(spec: str, model: str) -> tuple[str, str]:

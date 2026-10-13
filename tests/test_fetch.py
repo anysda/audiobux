@@ -267,18 +267,122 @@ def test_a_folder_is_listed_at_its_revision(monkeypatch):
     assert [f.name for f in files] == ["nn/a.onnx"]
 
 
-def test_the_loaders_ask_for_the_pinned_revision(tmp_path, monkeypatch):
+def test_the_loaders_ask_for_the_pinned_revision_on_disk(tmp_path, monkeypatch):
     import faster_whisper
     import huggingface_hub
 
-    asked: list[tuple[str, str | None]] = []
-    monkeypatch.setattr(
-        huggingface_hub, "hf_hub_download", lambda repo, name, revision, **kw: asked.append((repo, revision)) or name
-    )
-    monkeypatch.setattr(faster_whisper, "WhisperModel", lambda model, revision, **kw: asked.append((model, revision)))
+    asked: list[tuple[str, str | None, bool]] = []
+
+    def ask(repo, revision, local_files_only=False, **kw):
+        asked.append((repo, revision, local_files_only))
+        return repo
+
+    monkeypatch.setattr(huggingface_hub, "hf_hub_download", lambda repo, name, **kw: ask(repo, **kw))
+    monkeypatch.setattr(faster_whisper, "WhisperModel", ask)
     s = Settings(data=tmp_path, tts="tone", accent="")
     m = models.load(s)
     m.llm._file(s.llm)
     m.listener._load()
     qwen = s.llm.partition(":")[0]
-    assert asked == [(qwen, fetch.PINS[qwen].revision), (s.asr, fetch.PINS[fetch.whisper_repo(s.asr)].revision)]
+    assert asked == [
+        (qwen, fetch.PINS[qwen].revision, True),
+        (s.asr, fetch.PINS[fetch.whisper_repo(s.asr)].revision, True),
+    ]
+
+
+def hub_is_off() -> bool:
+    """What the hub and transformers ask before going out, transformers before converting
+    weights into safetensors."""
+    import os
+
+    from huggingface_hub import constants
+
+    return constants.is_offline_mode() and os.environ["DISABLE_SAFETENSORS_CONVERSION"] == "1"
+
+
+def test_offline_the_hub_takes_files_from_disk_and_asks_nothing(tmp_path):
+    import huggingface_hub
+    from huggingface_hub.errors import LocalEntryNotFoundError, OfflineModeIsEnabled
+    from huggingface_hub.utils import get_session
+
+    cache = tmp_path / "hf"
+    there = cache / "models--org--m" / "snapshots" / REVISION / "model.bin"
+    there.parent.mkdir(parents=True)
+    there.write_bytes(b"x")
+    assert not hub_is_off()
+    fetch.offline()
+    fetch.offline()  # again, as it comes
+    assert hub_is_off()
+    assert huggingface_hub.hf_hub_download("org/m", "model.bin", revision=REVISION, cache_dir=cache) == str(there)
+    with pytest.raises(LocalEntryNotFoundError):  # missing is an error, not a download
+        huggingface_hub.hf_hub_download("org/m", "config.json", revision=REVISION, cache_dir=cache)
+    with pytest.raises(OfflineModeIsEnabled):
+        get_session().get(f"https://huggingface.co/api/models/{takes.ALIGNER}")
+
+
+def test_the_process_goes_offline_once_the_models_are_in_place(tmp_path, folder):
+    class Watching(Hub):
+        def download(self, file, seen):
+            assert not hub_is_off(), "the fetch itself is online"
+            super().download(file, seen)
+
+    f = make(tmp_path, Watching({"a.bin": 1, "b.bin": 2}))
+    f.run()
+    assert f.ready and hub_is_off()
+
+
+def test_a_start_with_the_models_in_place_goes_offline_at_once(tmp_path, folder):
+    make(tmp_path, Hub({"a.bin": 1, "b.bin": 2})).run()
+    from huggingface_hub import constants
+
+    constants.HF_HUB_OFFLINE = False  # a new process
+    again = make(tmp_path, Hub({"a.bin": 1, "b.bin": 2}))
+    assert not hub_is_off()
+    again.start()
+    assert again._thread is None and hub_is_off()
+
+
+def test_a_start_with_models_missing_stays_online_until_they_come(tmp_path, folder):
+    gate = threading.Event()
+    f = make(tmp_path, Hub({"a.bin": 1, "b.bin": 2}, gate=gate))
+    f.start()
+    assert not f.ready and not hub_is_off()
+    gate.set()
+    f._thread.join(10)
+    assert f.ready and hub_is_off()
+
+
+def test_offline_the_vocoder_f5_asks_from_main_is_the_pinned_one(tmp_path, monkeypatch):
+    import huggingface_hub
+
+    hub_download = huggingface_hub.hf_hub_download
+
+    def download(repo_id, filename, revision, cache_dir, **kw):
+        # what the hub leaves for a commit asked by its hash: its snapshot, no `main` to point at it
+        where = Path(cache_dir) / f"models--{repo_id.replace('/', '--')}" / "snapshots" / revision / filename
+        where.parent.mkdir(parents=True, exist_ok=True)
+        where.write_text(filename)
+
+    monkeypatch.setattr(huggingface_hub, "hf_hub_download", download)
+    cache = tmp_path / "hub"
+    pin = fetch.PINS[fetch.VOCODER].revision
+    for name in fetch.VOCODER_FILES:
+        fetch.HuggingFace().download(fetch.File(fetch.VOCODER, name, pin, str(cache)), lambda n: None)
+    fetch.offline()
+    for name in fetch.VOCODER_FILES:
+        # as F5-TTS's load_vocoder asks: no revision
+        found = Path(hub_download(fetch.VOCODER, name, cache_dir=cache))
+        assert found.parent.name == pin and found.read_text() == name
+
+
+def test_the_cli_voices_a_book_offline(tmp_path, monkeypatch):
+    from audiobux import __main__ as cli
+    from audiobux import pipeline
+
+    seen: list[bool] = []
+    monkeypatch.setattr(pipeline, "run", lambda book, ctx, until: seen.append(hub_is_off()))
+    monkeypatch.setattr(cli, "context", lambda settings: None)
+    source = tmp_path / "Книга.epub"
+    source.write_bytes(b"x")
+    cli.voice_one(Settings(data=tmp_path / "data"), source, None, None)
+    assert seen == [True]

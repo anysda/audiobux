@@ -1,11 +1,11 @@
 """The models the settings need, fetched before the first book, with the bytes counted.
 
-Every model still loads itself on first use (`f5`, `takes`, `llm`, `models.Whisper`,
-RUAccent in `speech`) and would download what it misses then. Fetching it all here,
-into the same folders and by the same names, means no book stalls on a download
-and the interface can show how far it is. A source that is all in place gets a note
-in `models/.fetched/` with its files, so a restart with the models there touches
-neither the network nor the files.
+Every model loads itself on first use (`f5`, `takes`, `llm`, `models.Whisper`,
+RUAccent in `speech`), from the same folders and by the same names as fetched here.
+Once it is all in place the process goes offline (see `offline`): no loader asks the
+hub again, a missing file is an error, not a download. A source that is all in place
+gets a note in `models/.fetched/` with its files, so a restart with the models there
+touches neither the network nor the files.
 
 Every model is pinned: the revision on the hub and the sha256 of each file, as the
 service was tried with them. A file with other bytes is not in place: it is fetched
@@ -18,6 +18,8 @@ import hashlib
 import inspect
 import json
 import logging
+import os
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -30,7 +32,7 @@ from tqdm import tqdm
 from . import f5, takes
 from .config import Settings
 from .llm import hub_file
-from .runtime import Runtime
+from .runtime import ACCENT, ACCENT_REVISION, KOZIEV, Runtime
 
 log = logging.getLogger(__name__)
 
@@ -50,6 +52,8 @@ ALIGNER_FILES = ("*.json", "pytorch_model.bin")
 WHISPER_FILES = ("config.json", "preprocessor_config.json", "model.bin", "tokenizer.json", "vocabulary.*")
 # seconds before trying again after a failure, the last one for every failure after
 PAUSES = (10, 30, 60, 300)
+# Koziev's parser, which the runtime brings (see `runtime`)
+KOZIEV_PINNED = "\n".join(f"{d.sha256}  {d.name}" for d in KOZIEV)
 # the revision of each model's repo, then its files as `sha256sum` prints them
 PINNED = f"""
 {f5.REPO} {f5.REVISION}
@@ -74,7 +78,7 @@ e76620f83d5f5b69efd3d87e3dc180c1bd21df9fbebacfd4335e5e1efcc018da  model.bin
 7ccc62c6f2765af1f3b46c00c9b5894426835a05021c8b9c01eecb6dfb542711  preprocessor_config.json
 297b13372ac43916285644fb9687add3cc62ee2a1adb60da3dc25cc94c1871fd  tokenizer.json
 c69260f2ab26d659b7c398f9a2b2b48ed0df16c3b47d7326782fd9cba71690c1  vocabulary.json
-ruaccent/accentuator b78ae5ea1e62beaf138bed1865cd8c3b0b5ca855
+{ACCENT} {ACCENT_REVISION}
 aa460ebba90de00fbbf3d41d121961f605b98667e45efb7920f127473b15515e  dictionary/accents.json.gz
 8395664000b80c1afe09bfea3650945b0933482b8e3dee5bb9d429eb18c44935  dictionary/accents_nn.json.gz
 04a9e81c68d65f65ba493fe0110f99e79087548c2beeec3032e2b66e28706f36  dictionary/omographs.json.gz
@@ -82,16 +86,7 @@ aa460ebba90de00fbbf3d41d121961f605b98667e45efb7920f127473b15515e  dictionary/acc
 89a4c3c7529e299df58a0460589bf658a4f5427d9678ab78720320cf9ad3f3da  dictionary/rule_engine/forms.json
 c4ee777bbbab87f9eac838f370ad92974e079d02b21903e480c54b5f0c8c60d1  dictionary/yo_homographs.json.gz
 a19fa89a964a0691d9fe4ee384783e3934904891843d8f59a1c480d67947a82a  dictionary/yo_words.json.gz
-bf2b3ef3ff7a0aa6e4250aa4e9c8ed568e25f825deebdb12dee1b46b785ba9fc  koziev/rulemma/rulemma.dat
-61c0ae4ea718fc85000284dcbf798fb51657c41f3db3ae029e8bebfb33075f44  koziev/rulemma/rulemma.py
-68f14d0db5bc92e4da7363ca6c2c34812b18a87bdfe07714329bcfd711bdbe11  koziev/rupostagger/__init__.py
-a06848e656bef642aafb4440c03554fa78f2f32dde92ea66f3f86ce9977b167e  koziev/rupostagger/database/ruword2tags.db
-c8c19d1cd92855bc281b36ae80c3b10ed20d7f0aeeca54467c8fd00df319c614  koziev/rupostagger/rupostagger.config
-21b7b0bfd7427b5fdc1604052176db8aa3b139b3ce03be440cfce48536f8e5ef  koziev/rupostagger/rupostagger.model
-111b8c22db18407fb34bcd6e00b3c2245165de98ddec0fdb40862d82af864530  koziev/rupostagger/rupostagger.py
-331fdd0d9d10025bbebfc09ae648b21399d9f73cd168e1eeb76c10d6b0a31c00  koziev/rupostagger/rusyllab.py
-dde47b5f1d48ff899887ac07812dcabd2966e48e84646f3065bfd06627c2af58  koziev/rupostagger/ruword2tags.dat
-2858ad021915f3fe5bf9589ab1773f8c2cdd664f053f3f6bf317fec3fa3ed23b  koziev/rupostagger/ruword2tags.py
+{KOZIEV_PINNED}
 47e69d9ae19f2a82e21b1c70f6a4bbfb1abc5759e98b2e67d009c5e9d7af18c9  nn/nn_accent/big.onnx
 e377f159a8fc8673e211f100d4a237d5fe3dceb3b6789a5a738bf50bda23be49  nn/nn_accent/config.json
 4e393144e45626f6f1062a0784ef06f921b97321a8e7b87ac2a09a892286500a  nn/nn_accent/model.onnx
@@ -254,9 +249,26 @@ class HuggingFace:
         return Path(found) if isinstance(found, str) else None
 
     def download(self, file: File, seen: Callable[[int], None]) -> None:
-        from huggingface_hub import hf_hub_download
+        from huggingface_hub import constants, hf_hub_download
 
         hf_hub_download(**_where(file), tqdm_class=_counting(seen))
+        if file.revision and not file.local:
+            # F5-TTS takes its vocoder from `main`: offline it finds the pinned revision there
+            refs = Path(file.cache or constants.HF_HUB_CACHE) / f"models--{file.repo.replace('/', '--')}" / "refs"
+            refs.mkdir(exist_ok=True)
+            (refs / "main").write_text(file.revision)
+
+
+def offline() -> None:
+    """From here on the process takes the models from disk only: the hub refuses every
+    request, transformers looks for no safetensors to convert the pinned weights into.
+    Process-wide, as the loaders inside F5-TTS and transformers take no flag from here."""
+    os.environ["HF_HUB_OFFLINE"] = "1"  # the hub imported from now on
+    os.environ["DISABLE_SAFETENSORS_CONVERSION"] = "1"
+    if "huggingface_hub.constants" in sys.modules:  # and the one imported already, which read it then
+        from huggingface_hub import constants
+
+        constants.HF_HUB_OFFLINE = True
 
 
 def _where(file: File) -> dict[str, Any]:
@@ -324,7 +336,7 @@ def _accent(size: str, workdir: Path) -> list[Source]:
     paths = [*accent.accentuator_paths, accent.omograph_models_paths[size]]
     found = [Source(repo, folders=tuple(p.strip("/") for p in paths), local=str(workdir))]
     package = Path(ruaccent.__file__).parent
-    # the image brings it; RUAccent fetches it only when the folder is not there
+    # the runtime brings it; RUAccent installed without one fetches it only when the folder is not there
     if not (package / "koziev").exists():
         found.append(Source(repo, folders=tuple(p.strip("/") for p in accent.koziev_paths), local=str(package)))
     return found
@@ -377,7 +389,9 @@ class Fetch:
         return ahead + min(self.done + self._part, self.total), ahead + self.total
 
     def start(self) -> None:
-        if not self.ready and self._thread is None:
+        if self.ready:
+            offline()
+        elif self._thread is None:
             self._thread = threading.Thread(target=self.run, name="fetch", daemon=True)
             self._thread.start()
 
@@ -397,6 +411,7 @@ class Fetch:
             self._note(source, [f for f, _, _ in files])
             self.pending.remove(source)
         log.info("models: all in place")
+        offline()
         self.on_ready()
 
     def _pending(self) -> list[Source]:

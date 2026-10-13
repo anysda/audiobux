@@ -117,7 +117,7 @@ class ToneTts:
 
 
 class Whisper:
-    """faster-whisper; the model is downloaded into the models volume on first use.
+    """faster-whisper; the model is the one `fetch` put into the models volume.
     listen_many() hears several recordings at once, one CTranslate2 worker each."""
 
     def __init__(self, model: str, models: Path, workers: int = 4, revision: str | None = None) -> None:
@@ -143,6 +143,7 @@ class Whisper:
                 device="auto",
                 compute_type="default",
                 download_root=str(self.models / "whisper"),
+                local_files_only=True,
                 num_workers=self.workers,
             )
 

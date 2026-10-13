@@ -94,6 +94,7 @@ def net(monkeypatch):
     monkeypatch.setattr(
         runtime, "LLAMA", Download("llama.tgz", "https://l/llama.tgz", len(tgz), hashlib.sha256(tgz).hexdigest())
     )
+    monkeypatch.setattr(runtime, "KOZIEV", ())
     return Net(
         {
             "https://w/alpha-1.0-py3-none-any.whl": ALPHA,
@@ -236,6 +237,91 @@ def test_activate_puts_it_on_the_paths(tmp_path, net, monkeypatch):
     assert os.environ["LD_LIBRARY_PATH"] == f"{r.site}/nvidia/cuda_runtime/lib:{r.site}/nvidia/cublas/lib"
     monkeypatch.delitem(sys.modules, "alpha", raising=False)
     assert importlib.import_module("alpha").A == 1
+
+
+# Koziev's parser in RUAccent's package folder
+
+LEMMA, TAGGER = b"lemma" * 50, b"tagger" * 30
+
+
+@pytest.fixture
+def koziev(net, monkeypatch):
+    files = {"koziev/rulemma/rulemma.dat": LEMMA, "koziev/rupostagger/database/ruword2tags.db": TAGGER}
+    pinned = tuple(
+        Download(name, f"https://k/{name}", len(data), hashlib.sha256(data).hexdigest()) for name, data in files.items()
+    )
+    monkeypatch.setattr(runtime, "KOZIEV", pinned)
+    net.files.update({d.url: files[d.name] for d in pinned})
+    return net
+
+
+def test_koziev_goes_into_ruaccents_package_folder(tmp_path, koziev):
+    r = Runtime(two(tmp_path), tmp_path / "runtime", koziev.get)
+    r.install()
+    there = r.site / "ruaccent" / "koziev"
+    assert (there / "rulemma/rulemma.dat").read_bytes() == LEMMA
+    assert (there / "rupostagger/database/ruword2tags.db").read_bytes() == TAGGER
+    assert r.ready and r.done == r.total == len(ALPHA) + len(F5) + runtime.LLAMA.size + len(LEMMA) + len(TAGGER)
+    assert not list(r.dir.glob("*.part"))
+    asked = len(koziev.asked)
+    assert Runtime(two(tmp_path), tmp_path / "runtime", koziev.get).ready and len(koziev.asked) == asked
+
+
+@pytest.mark.parametrize("damage", ["gone", "short", "other bytes"])
+def test_a_runtime_without_whole_koziev_is_not_ready_and_the_install_mends_it(tmp_path, koziev, damage):
+    Runtime(two(tmp_path), tmp_path / "runtime", koziev.get).install()
+    tagger = Runtime(two(tmp_path), tmp_path / "runtime").site / "ruaccent/koziev/rupostagger/database/ruword2tags.db"
+    if damage == "gone":
+        tagger.unlink()
+    else:
+        tagger.write_bytes(TAGGER[:-1] if damage == "short" else b"z" * len(TAGGER))
+    asked = len(koziev.asked)
+    r = Runtime(two(tmp_path), tmp_path / "runtime", koziev.get)
+    assert not r.ready
+    r.install()
+    # the wheels and the rest of Koziev are in place: only the damaged file comes again
+    assert r.ready and koziev.asked[asked:] == ["https://k/koziev/rupostagger/database/ruword2tags.db"]
+    assert tagger.read_bytes() == TAGGER
+
+
+def test_koziev_put_there_by_ruaccent_is_taken_by_its_bytes(tmp_path, koziev):
+    """RUAccent itself fetches the folder and fails halfway: what came whole stays."""
+    r = Runtime(two(tmp_path), tmp_path / "runtime", koziev.get)
+    (r.site / "ruaccent/koziev/rulemma").mkdir(parents=True)
+    (r.site / "ruaccent/koziev/rulemma/rulemma.dat").write_bytes(LEMMA)
+    assert not r.ready
+    r.install()
+    assert r.ready and "https://k/koziev/rulemma/rulemma.dat" not in koziev.asked
+    assert r.done == r.total
+
+
+def test_koziev_with_other_bytes_is_not_taken(tmp_path, koziev):
+    r = Runtime(two(tmp_path), tmp_path / "runtime", koziev.get)
+    koziev.bad["https://k/koziev/rupostagger/database/ruword2tags.db"] = 1
+    with pytest.raises(ValueError, match=r"ruword2tags\.db came with a sha256 other than the pinned one"):
+        r.install()
+    assert not r.ready and not (r.dir / "done").exists() and not list(r.dir.glob("*.part"))
+    assert not (r.site / "ruaccent/koziev/rupostagger/database/ruword2tags.db").exists()
+    assert not Runtime(two(tmp_path), tmp_path / "runtime", koziev.get).ready
+    r.install()
+    assert r.ready
+
+
+def test_koziev_is_pinned_once_at_the_revision_of_the_ruaccent_models():
+    pin = fetch.PINS["ruaccent/accentuator"]
+    assert pin.revision == runtime.ACCENT_REVISION
+    assert {d.name: d.sha256 for d in runtime.KOZIEV} == {
+        n: h for n, h in pin.sha256.items() if n.startswith("koziev/")
+    }
+    # every file of the folders RUAccent's load() looks at, each from the pinned revision
+    assert {d.name.rsplit("/", 1)[0] for d in runtime.KOZIEV} == {
+        "koziev/rulemma",
+        "koziev/rupostagger",
+        "koziev/rupostagger/database",
+    }
+    assert all(
+        d.url == f"https://huggingface.co/ruaccent/accentuator/resolve/{pin.revision}/{d.name}" for d in runtime.KOZIEV
+    )
 
 
 # the fetch waits for the runtime

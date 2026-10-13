@@ -166,3 +166,13 @@ def sock():
     folder = Path(tempfile.mkdtemp(prefix="ab-"))
     yield folder / "w.sock"
     shutil.rmtree(folder, ignore_errors=True)
+
+
+@pytest.fixture(autouse=True)
+def online(monkeypatch):
+    """`fetch.offline` turns the hub off for the whole process: each test starts with it on."""
+    import huggingface_hub.constants
+
+    monkeypatch.setenv("HF_HUB_OFFLINE", "0")
+    monkeypatch.setenv("DISABLE_SAFETENSORS_CONVERSION", "0")
+    monkeypatch.setattr(huggingface_hub.constants, "HF_HUB_OFFLINE", False)
