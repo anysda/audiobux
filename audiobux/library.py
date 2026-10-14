@@ -37,7 +37,13 @@ create table if not exists books (
 create index if not exists books_sha on books (sha);
 """
 # columns that came later: a database made before them gets them on the next start
-ADDED = {"percent": "integer not null default 0", "eta": "integer", "worked": "real not null default 0"}
+ADDED = {
+    "percent": "integer not null default 0",
+    "eta": "integer",
+    "worked": "real not null default 0",
+    # the version of the reading the book was finished with, see `refresh`
+    "parse": "integer not null default 0",
+}
 
 UNFINISHED = "('queued', 'running', 'paused')"
 
@@ -89,6 +95,12 @@ class Library:
     def next(self) -> sqlite3.Row | None:
         """The book to voice: one already started first, then the one that came first."""
         return self._one(f"select * from books where state in {UNFINISHED} order by step is null, added, rowid limit 1")
+
+    def stale(self, version: int) -> sqlite3.Row | None:
+        """A finished book read by a reading older than `version`."""
+        return self._one(
+            "select * from books where state = 'done' and parse < ? order by added, rowid limit 1", (version,)
+        )
 
     def queue(self) -> int:
         row = self._one(f"select count(*) from books where state in {UNFINISHED}")

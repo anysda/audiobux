@@ -25,7 +25,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from . import contract, fetch, formats, pipeline, reading
+from . import contract, fetch, formats, pipeline, reading, refresh
 from .book import Book
 from .config import Settings
 from .contract import Fault
@@ -115,6 +115,11 @@ class Worker:
             if self.current:
                 self.voice(*self.current)
                 continue
+            # with the queue empty, the books finished by an older reading are read again
+            stale = None if left or not self.fetch.ready else self.library.stale(refresh.VERSION)
+            if stale:
+                self.refresh(stale)
+                continue
             if until_idle and not self.library.queue():
                 return
             self.ctx.quiet.sleep(left or IDLE)
@@ -148,6 +153,29 @@ class Worker:
             if deleted:
                 self.library.remove_files(book_id)
             self.unload()
+
+    def refresh(self, row: Any) -> None:
+        """A finished book gets the title, the author and the chapters the reading of
+        today finds, around the same sound. Whatever goes wrong, the book stays as it was
+        and is not read again until the reading changes once more."""
+        book_id = row["id"]
+        folder = self.settings.library / book_id
+        work = self.settings.work / f"{book_id}.refresh"
+        fields: dict[str, object] = {"parse": refresh.VERSION}
+        log.info("%s: reading again", book_id)
+        try:
+            name = (row["title"] or "Без названия") + next(folder.glob("source.*")).suffix
+            found = refresh.run(folder, name, work, self.ctx)
+            fields |= {"title": found["title"], "author": found["author"]}
+            if "chapters" in found:
+                fields["chapters"] = json.dumps(found["chapters"], ensure_ascii=False)
+            log.info("%s: read again, %d chapters", book_id, len(found.get("chapters", [])))
+        except Exception:
+            log.exception("%s: reading again failed, the book stays as it was", book_id)
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+            self.unload()
+        self._set(book_id, **fields)
 
     def unload(self) -> None:
         """Takes every model off the card; each one loads itself again when used."""
@@ -200,6 +228,7 @@ class Worker:
             percent=100,
             eta=0,
             worked=self._worked,
+            parse=refresh.VERSION,
             duration=made["duration"],
             chapters=json.dumps(made["chapters"], ensure_ascii=False),
         )

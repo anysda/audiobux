@@ -78,6 +78,17 @@ def assemble(
     }
 
 
+def retag(src: Path, out: Path, meta: dict[str, str], chapters: list[dict[str, Any]], duration: float) -> None:
+    """`src` into `out` with other tags and chapters; the sound and the cover go over
+    as they are, not encoded again."""
+    metafile = out.with_suffix(".txt")
+    starts = {n: float(c["start"]) for n, c in enumerate(chapters)}
+    metafile.write_text(_ffmetadata(meta, [c["title"] for c in chapters], starts, duration))
+    cmd = ["ffmpeg", "-y", "-v", "error", "-i", str(src), "-i", str(metafile), "-map", "0:a", "-map", "0:v?"]
+    cmd += ["-map_metadata", "1", "-map_chapters", "1", "-c", "copy", "-movflags", "+faststart", "-f", "ipod", str(out)]
+    subprocess.run(cmd, check=True)
+
+
 def _measure(source: list[str]) -> dict[str, str] | None:
     """First loudnorm pass; None when there is nothing to measure (pure silence)."""
     measure = [*source, "-af", f"loudnorm={LOUDNESS}:print_format=json", "-f", "null", "-"]
