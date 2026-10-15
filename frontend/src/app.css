@@ -1448,6 +1448,14 @@ button.pill:active {
 .dld .bar {
   margin: 0;
 }
+/* a book in work: the drawn letter moves up and shrinks, the stage below it stays readable */
+.dcv:has(.dld) .cv {
+  --cs: 90cqw;
+}
+.dcv:has(.dld) .cv b {
+  top: 18%;
+  bottom: auto;
+}
 .dc.cur .cv {
   box-shadow: 0 0 0 1.5px var(--white);
 }
@@ -1504,6 +1512,7 @@ button.pill:active {
   margin-top: 28px;
 }
 .pchl {
+  flex: 1 1 0;
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--white) 40%, transparent) transparent;
 }
