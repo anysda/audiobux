@@ -44,8 +44,8 @@
     return { chapters, times };
   });
 
-  // the last piece begun by `t`, while it is still being heard (a short pause keeps it lit)
-  function find(t: number) {
+  // the last piece begun by `t`, or -1
+  function begun(t: number) {
     const ts = view.times;
     let lo = 0,
       hi = ts.length - 1,
@@ -57,7 +57,13 @@
         lo = m + 1;
       } else hi = m - 1;
     }
-    return i >= 0 && t < ts[i][1] + 2 ? i : -1;
+    return i;
+  }
+
+  // the last piece begun by `t`, while it is still being heard (a short pause keeps it lit)
+  function find(t: number) {
+    const i = begun(t);
+    return i >= 0 && t < view.times[i][1] + 2 ? i : -1;
   }
 
   const el = (k: number) => box?.querySelector<HTMLElement>(`[data-k="${k}"]`) ?? null;
@@ -68,8 +74,9 @@
       b = box,
       s = now >= 0 ? el(now) : null;
     if (!a || !b) return;
-    const r = s?.getClientRects()[0];
-    a.classList.toggle('off', !r || !follow);
+    // between pieces, as at the start of a chapter, the text goes to the next one heard and the arrow waits
+    const r = (s ?? el(begun(lib.at(id)) + 1))?.getClientRects()[0];
+    a.classList.toggle('off', !s || !r || !follow);
     if (!r) return;
     const rr = b.getBoundingClientRect();
     const y = r.top - rr.top + b.scrollTop + (r.height - 24) / 2;
@@ -140,7 +147,8 @@
     arrow?.classList.add('off');
   }
 
-  // play after a pause, a skip, the scrub or a chapter sends the voice on: the text goes back to it
+  // play after a pause, a skip, the scrub or a chapter sends the voice on: the text goes back to it;
+  // while playing and followed it is already there, paused it goes too
   let was: { t: number; w: number; on: boolean } | null = null;
   $effect(() => {
     const t = lib.at(id),
@@ -148,15 +156,14 @@
       w = performance.now(),
       p = was;
     was = { t, w, on };
-    if (follow || !p) return;
-    const drift = t - p.t - (p.on ? ((w - p.w) / 1000) * lib.speed : 0);
-    if ((on && !p.on) || Math.abs(drift) > 1) {
-      follow = true;
-      moved = false;
-      shown = false;
-      if (now >= 0) el(now)?.classList.add('now');
-      place();
-    }
+    if (!p) return;
+    const jump = Math.abs(t - p.t - (p.on ? ((w - p.w) / 1000) * lib.speed : 0)) > 1;
+    if (follow ? on || !jump : !jump && !(on && !p.on)) return;
+    follow = true;
+    moved = false;
+    shown = false;
+    if (now >= 0) el(now)?.classList.add('now');
+    place();
   });
 
   // a picture above pushes the text down once it loads: put the arrow back, and the voice in view
