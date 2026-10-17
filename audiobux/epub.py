@@ -2,11 +2,12 @@
 
 The text is the corrected reading text of the `fix` step: digits stay digits, no
 stress marks. Its blocks come from `reading`: chapters are those of the m4b, deeper
-headings those of the book's outline. Where the audiobook reads a figure
-description, the EPUB shows the picture cut from the book, with the description as
-its alt text and the book's caption under it; a listing is shown as code, as the
-book prints it. The cover is the m4b's cover. A source that is a reading copy itself
-(an EPUB) is not rebuilt: it goes out as it came in.
+headings those of the book's outline. The table of contents lists the chapters in
+one level, as the player does. Where the audiobook reads a figure description, the
+EPUB shows the picture cut from the book, with the description as its alt text and
+the book's caption under it; a listing is shown as code, as the book prints it. The
+cover is the m4b's cover. A source that is a reading copy itself (an EPUB) is not
+rebuilt: it goes out as it came in.
 """
 
 import html
@@ -72,16 +73,15 @@ def write(
     style = epub.EpubItem(uid="style", file_name="style.css", media_type="text/css", content=STYLE)
     book.add_item(style)
 
-    heads: list[tuple[int, str, str]] = []
+    toc: list[epub.Link] = []
     docs: list[epub.EpubHtml] = []
     for n, chapter in enumerate(reading.chapters(data, figures, folder, name), 1):
         file = f"text/{n:04}.xhtml"
         body: list[str] = []
-        for k, block in enumerate(chapter.blocks):
+        for block in chapter.blocks:
             if block.kind == "h":
-                href, anchor = (file, "") if k == 0 and chapter.title else (f"{file}#h{k}", f"h{k}")
-                heads.append((block.level, block.text, href))
-                body.append(_heading(f"h{min(block.level, 6)}", block.text, anchor))
+                tag = f"h{min(block.level, 6)}"
+                body.append(f"<{tag}>{html.escape(block.text)}</{tag}>")
             elif block.kind == "figure":
                 assert block.figure is not None
                 body.append(_figure(book, folder, block.figure, block.text))
@@ -94,8 +94,10 @@ def write(
         doc.add_link(href="../style.css", rel="stylesheet", type="text/css")
         book.add_item(doc)
         docs.append(doc)
+        if chapter.title:
+            toc.append(epub.Link(file, chapter.title, f"toc{n}"))
 
-    book.toc = _tree(heads)
+    book.toc = toc
     book.add_item(epub.EpubNcx())
     book.add_item(epub.EpubNav())
     book.spine = (["cover"] if cover else []) + ["nav", *docs]
@@ -110,33 +112,3 @@ def _figure(book: epub.EpubBook, folder: Path, f: dict[str, Any], said: str) -> 
     caption = f.get("caption", "").strip()
     tail = f"<figcaption>{html.escape(caption)}</figcaption>" if caption else ""
     return f'<figure><img src="../{file}" alt="{html.escape(said, quote=True)}"/>{tail}</figure>'
-
-
-def _heading(tag: str, text: str, anchor: str = "") -> str:
-    attr = f' id="{anchor}"' if anchor else ""
-    return f"<{tag}{attr}>{html.escape(text)}</{tag}>"
-
-
-type Toc = list[epub.Link | tuple[epub.Section, Toc]]
-
-
-def _tree(heads: list[tuple[int, str, str]]) -> Toc:
-    """Flat (level, title, href) into the nested TOC ebooklib wants."""
-    root: list[dict[str, Any]] = []
-    stack: list[tuple[int, list[dict[str, Any]]]] = [(-1, root)]
-    for n, (level, title, href) in enumerate(heads):
-        while stack[-1][0] >= level:
-            stack.pop()
-        node: dict[str, Any] = {"title": title, "href": href, "uid": f"toc{n}", "children": []}
-        stack[-1][1].append(node)
-        stack.append((level, node["children"]))
-
-    def convert(nodes: list[dict[str, Any]]) -> Toc:
-        return [
-            (epub.Section(x["title"], x["href"]), convert(x["children"]))
-            if x["children"]
-            else epub.Link(x["href"], x["title"], x["uid"])
-            for x in nodes
-        ]
-
-    return convert(root)

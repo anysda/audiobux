@@ -6,7 +6,8 @@ same book.
 Chapters are those of the m4b; headings deeper than that come from the book's
 outline, a paragraph that reads as the next outline entry is a heading. A paragraph
 close to the description of the next figure with a picture is that figure. A listing
-is shown as code; its telling, when there is one, is only heard.
+is shown as code; its telling, when there is one, is only heard. A chapter heading
+printed in several lines is one heading, voiced by the first of them.
 """
 
 import logging
@@ -27,6 +28,8 @@ log = logging.getLogger(__name__)
 FIGURE_MATCH = 85
 # outline entries looked ahead when one is missing from the text
 LOOKAHEAD = 3
+# lines a chapter heading may be printed in
+HEADING_LINES = 3
 
 
 @dataclass
@@ -65,9 +68,8 @@ def chapters(data: dict[str, Any], figures: list[dict[str, Any]], folder: Path, 
         blocks: list[Block] = []
         first = 0
         if heading:
-            voiced = bool(paragraphs) and str(0) not in listings and same(paragraphs[0], heading)
-            blocks.append(Block("h", heading, 0 if voiced else None, outline.take(heading) or 1))
-            first = int(voiced)  # the heading as the text has it
+            first = _opening(paragraphs, listings, heading)  # the heading as the text has it
+            blocks.append(Block("h", heading, 0 if first else None, outline.take(heading) or 1))
         for k in range(first, len(paragraphs)):
             p = paragraphs[k]
             if str(k) in listings:
@@ -121,6 +123,17 @@ class Pictures:
                 self.at = i + 1
                 return self.figures[i]
         return None
+
+
+def _opening(paragraphs: list[str], listings: dict[str, str], heading: str) -> int:
+    """How many first paragraphs the heading is printed in, 0 when the text does not
+    open with it; a heading broken in lines is one heading."""
+    for n in range(1, min(HEADING_LINES, len(paragraphs)) + 1):
+        if str(n - 1) in listings:
+            break
+        if same(" ".join(paragraphs[:n]), heading):
+            return n
+    return 0
 
 
 def same(text: str, title: str) -> bool:

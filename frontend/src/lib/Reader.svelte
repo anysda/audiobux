@@ -40,7 +40,10 @@
         : b.type === 'figure'
           ? { kind: 'figure', src: b.src, alt: b.alt, k: num(b.t0, b.t1) }
           : { kind: b.type, text: b.text, k: num(b.t0, b.t1) };
-    const chapters = (sync?.chapters ?? []).map((c) => ({ title: c.title, pieces: c.blocks.map(piece) }));
+    // the chapter's own heading is its title, shown once
+    const body = (c: { title: string; blocks: Block[] }) =>
+      c.blocks.filter((b, j) => !(j === 0 && b.type === 'h' && b.text === c.title));
+    const chapters = (sync?.chapters ?? []).map((c) => ({ title: c.title, pieces: body(c).map(piece) }));
     return { chapters, times };
   });
 

@@ -15,6 +15,7 @@ from audiobux.book import Book
 SAID = "На рисунке 1.1 схема: три блока стоят в ряд и соединены стрелками слева направо."
 CAPTION = "Рис. 1.1. Три блока"
 FIRST = ["Глава 1. Начало", "Блоки", "Как они связаны"]
+CHAPTERS = [(FIRST[0], []), (FIRST[1], []), ("Глава 2. Дальше", [])]
 
 
 @pytest.fixture(scope="session")
@@ -103,7 +104,7 @@ def test_pdf_book_gets_chapters_headings_figure_and_cover(tmp_path, blocks_pdf):
     assert result.get_metadata("DC", "title")[0][0] == "Блоки"
     assert result.get_metadata("DC", "creator")[0][0] == "Иванов"
     assert result.get_metadata("DC", "language")[0][0] == "ru"
-    assert nav(book.path("book.epub")) == [(FIRST[0], [(FIRST[1], [(FIRST[2], [])])]), ("Глава 2. Дальше", [])]
+    assert nav(book.path("book.epub")) == CHAPTERS, "the chapters of the m4b in one level, no deeper headings"
 
     assert len(docs) == 3, "the chapters of the m4b"
     chapter = docs["text/0002.xhtml"]
@@ -145,6 +146,22 @@ def test_text_is_the_fixed_text_not_the_spoken_one(tmp_path):
     doc = docs["text/0001.xhtml"]
     assert doc.find(".//h1").text_content() == "Книга", "a book without a TOC is one chapter named after it"
     assert [p.text_content() for p in doc.iter("p")] == data["chapters"][0]["paragraphs"]
+
+
+def test_printed_contents_make_no_entries_of_the_nav(tmp_path):
+    lines = ["Глава 1. Начало", "Раздел", "Глава 2. Конец"]
+    data = {
+        "title": "Книга",
+        "author": "Автор",
+        "outline": [(1, lines[0], 2), (2, lines[1], 2), (1, lines[2], 3)],
+        "chapters": [
+            {"title": "", "paragraphs": ["Содержание", *lines]},
+            {"title": lines[0], "paragraphs": [lines[0], "Текст.", lines[1], "Ещё текст."]},
+            {"title": lines[2], "paragraphs": [lines[2], "Последний текст."]},
+        ],
+    }
+    epub.write(data, [], tmp_path, tmp_path / "b.epub", "Автор - Книга.pdf")
+    assert nav(tmp_path / "b.epub") == [("Книга", []), (lines[0], []), (lines[2], [])]
 
 
 def test_a_figure_the_text_lost_is_left_out(tmp_path):
@@ -228,7 +245,7 @@ def test_scan_figures_reach_the_epub(tmp_path, blocks_pdf):
     assert [f["said"] for f in book.read("figures.json")] == [SAID]
     _, docs = read(book.path("book.epub"))
     assert [i.get("alt") for d in docs.values() for i in d.iter("img")] == [SAID]
-    assert nav(book.path("book.epub")) == [(FIRST[0], [(FIRST[1], [(FIRST[2], [])])]), ("Глава 2. Дальше", [])]
+    assert nav(book.path("book.epub")) == CHAPTERS, "the chapters of the m4b in one level, no deeper headings"
 
 
 def test_epub_goes_next_to_the_m4b(tmp_path, chekhov_epub):

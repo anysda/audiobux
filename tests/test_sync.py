@@ -215,6 +215,36 @@ def test_a_voiced_chapter_heading_is_its_first_paragraph(tmp_path):
     assert [(b.kind, b.text, b.said) for b in chapter.blocks] == [("h", "Глава 1", 0), ("p", "Текст.", 1)]
 
 
+@pytest.mark.parametrize(
+    ("paragraphs", "blocks"),
+    [
+        (["ПОПРОБУЙТЕ СДЕЛАТЬ ШАГ", "(вместо послесловия)", "Текст."], [("h", 0), ("p", 2)]),
+        (["Попробуйте сделать шаг (вместо послесловия)", "Текст."], [("h", 0), ("p", 1)]),
+        (
+            ["Попробуйте", "сделать", "шаг", "(вместо послесловия)", "Текст."],
+            [("h", None)] + [("p", k) for k in range(5)],
+        ),
+        (["Текст."], [("h", None), ("p", 0)]),
+        ([], [("h", None)]),
+    ],
+)
+def test_a_heading_printed_in_lines_is_one_heading(tmp_path, paragraphs, blocks):
+    title = "Попробуйте сделать шаг (вместо послесловия)"
+    data = {"title": "К", "chapters": [{"title": title, "paragraphs": paragraphs, "listings": {}}]}
+    (chapter,) = reading.chapters(data, [], tmp_path, "К.pdf")
+    assert [(b.kind, b.said) for b in chapter.blocks] == blocks
+    assert [b.text for b in chapter.blocks].count(title) == 1
+
+
+def test_a_listing_is_no_line_of_the_heading(tmp_path):
+    data = {
+        "title": "К",
+        "chapters": [{"title": "Глава 1 x = 1", "paragraphs": ["Глава 1", "x = 1"], "listings": {"1": "x = 1"}}],
+    }
+    (chapter,) = reading.chapters(data, [], tmp_path, "К.pdf")
+    assert [(b.kind, b.said) for b in chapter.blocks] == [("h", None), ("p", 0), ("code", 1)]
+
+
 def test_a_figure_gets_a_name_the_web_serves(tmp_path):
     source = tmp_path / "Книга.epub"
     source.write_bytes(b"")
