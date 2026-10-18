@@ -4,6 +4,7 @@ the pages OCR reads off a scan."""
 import re
 import string
 import unicodedata
+from collections import Counter
 from itertools import pairwise
 
 from rapidfuzz import fuzz
@@ -13,6 +14,8 @@ from .document import Chapter
 
 PUNCT = set(string.punctuation + "«»„“”‘’—–…№•·°§©®™×€₽\xad")
 VOWELS = set("aeiouyаеёиоуыэюя")
+# a word and the space after it, with the word that follows
+PAIR = re.compile(r"(?<![^\W\d_])([^\W\d_]+) (?=([^\W\d_]+)(?![^\W\d_]))")
 
 
 def top_levels(outline: list[tuple[int, str, int]], depth: int) -> list[tuple[int, str, int]]:
@@ -60,6 +63,8 @@ def from_pages(pages: list[list[str]], toc: list[tuple[int, str, int]]) -> list[
             else:
                 paragraphs.append((n, text))
 
+    mend = Mend([t for _, t in paragraphs])
+    paragraphs = [(n, mend(t)) for n, t in paragraphs]
     if not toc:
         return [{"title": "", "paragraphs": [t for _, t in paragraphs]}] if paragraphs else []
 
@@ -73,9 +78,23 @@ def from_pages(pages: list[list[str]], toc: list[tuple[int, str, int]]) -> list[
         if b > a:
             body = [t for _, t in paragraphs[a:b]]
             if not _matches(body[0], title):  # heading lost with the running headers: say it anyway
-                body.insert(0, spaces(title))
-            chapters.append({"title": spaces(title), "paragraphs": body})
+                body.insert(0, mend(spaces(title)))
+            chapters.append({"title": mend(spaces(title)), "paragraphs": body})
     return chapters
+
+
+class Mend:
+    """Words the text layer broke with a space ("ЧЕТЫ РЕ ВОЗРАСТА") made whole: two
+    pieces never seen in the book on their own, while together they are one of its
+    words. Two words of the book stay two."""
+
+    def __init__(self, texts: list[str]) -> None:
+        words = Counter(w.lower() for t in texts for w in re.findall(r"[^\W\d_]+", t))
+        pairs = Counter((m[1].lower(), m[2].lower()) for t in texts for m in PAIR.finditer(t))
+        self.broken = {(a, b) for (a, b), n in pairs.items() if words[a + b] and words[a] == n == words[b]}
+
+    def __call__(self, text: str) -> str:
+        return PAIR.sub(lambda m: m[1] if (m[1].lower(), m[2].lower()) in self.broken else m[0], text)
 
 
 def _aside(text: str) -> bool:
@@ -118,7 +137,9 @@ def strip_running(pages: list[list[str]]) -> list[list[str]]:
 
 def _join_lines(block: str) -> str:
     """A block's lines into one paragraph; code keeps its lines."""
-    text = re.sub(r"\xad\s*\n\s*", "", block).replace("\xad", "")  # a soft hyphen at the end of a line joins the word
+    # a soft hyphen at the end of a line joins the word; at the end of the block it is a
+    # hyphen, the word goes on in the next block
+    text = re.sub(r"\xad\s*\n\s*", "", re.sub(r"\xad\s*$", "-", block)).replace("\xad", "")
     text = re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", " ", text)
     text = re.sub(r"(\w)-\s*\n\s*(?=[a-zа-яё])", r"\1", text)
     return code_lines(text) if looks_like_code(text) else spaces(text)
@@ -156,4 +177,6 @@ def _squash(text: str, digits: bool = True) -> str:
 
 
 def spaces(text: str) -> str:
-    return re.sub(r"\s+", " ", text).strip()
+    """One space between words, none inside brackets: "( вместо )" is "(вместо)"."""
+    text = re.sub(r"\s+", " ", text).strip()
+    return re.sub(r"\s+\)", ")", re.sub(r"\(\s+", "(", text))

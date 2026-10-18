@@ -10,7 +10,7 @@ from test_pipeline import context, new_book, probe
 
 from audiobux import formats, pipeline
 from audiobux.formats import Document, Kind
-from audiobux.formats.pages import from_pages, has_text_layer, top_levels
+from audiobux.formats.pages import Mend, from_pages, has_text_layer, spaces, top_levels
 
 TITLES = [t for t, _ in stories()]
 
@@ -81,6 +81,32 @@ def test_page_cleanup():
         "Второй абзац.",
         "Третий абзац.",
     ]
+
+
+def test_a_word_broken_by_a_space_is_made_whole():
+    texts = ["ЧЕТЫ РЕ ВОЗРАСТА СИСТЕМ", "Четыре года и четыре дня.", "Старый дом стоял, старый дом", "домино"]
+    mend = Mend(texts)
+    assert mend(texts[0]) == "ЧЕТЫРЕ ВОЗРАСТА СИСТЕМ"
+    assert mend("Четы ре возраста") == "Четыре возраста", "the case does not matter"
+    assert mend(texts[2]) == texts[2], "two words of the book stay two, even when they make a third"
+    assert Mend([]).broken == set() and Mend([""])("") == ""
+    assert Mend(["четы ре", "четыре"]).broken == {("четы", "ре")}
+    twice = Mend(["четы ре года", "четы ре дня", "четыре"])
+    assert twice("четы ре года, четы ре дня") == "четыре года, четыре дня", "the same break again"
+    seen = Mend(["четы ре", "четыре", "ре"])
+    assert seen("четы ре") == "четы ре", "a piece seen on its own may be a word"
+
+
+def test_a_word_hyphenated_across_blocks_and_pages_is_one_word():
+    pages = [["Первый абзац о ре\xad", "шении задачи.", "Он пере\xad"], ["носит слово на другую страницу."]]
+    (chapter,) = from_pages(pages, [])
+    assert chapter["paragraphs"] == ["Первый абзац о решении задачи.", "Он переносит слово на другую страницу."]
+
+
+def test_no_space_inside_brackets():
+    assert spaces("( вместо  послесловия )") == "(вместо послесловия)"
+    assert spaces("Б ( как в  начале)") == "Б (как в начале)"
+    assert spaces("") == "" and spaces("()") == "()"
 
 
 # Telling a format by what is in the file
