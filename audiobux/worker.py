@@ -135,7 +135,8 @@ class Worker:
             for s in pipeline.STEPS:
                 if not book.done(s.name):
                     step = s.name
-                    self._begin(book_id, book, step)
+                    if applies(book, step):
+                        self._begin(book_id, book, step)
                     pipeline.run(book, self.ctx, until=step)
                     self.unload()  # the next step loads its own model
             step = "publish"
@@ -458,6 +459,16 @@ def outline(book: Book) -> list[str]:
         if book.path(name).exists():
             return reading.titles(book.read(name), book.name)
     return []
+
+
+def applies(book: Book, step: str) -> bool:
+    """Whether the book has anything for `step` to do: a scan to read, figures to tell.
+    A step with nothing to do is not shown."""
+    if step == "ocr":
+        return book.path("scan.json").exists()
+    if step == "figures":
+        return book.path("text.json").exists() and bool(book.read("text.json").get("figures"))
+    return True
 
 
 def pieces(book: Book, folder: str = "tts") -> tuple[int, int]:

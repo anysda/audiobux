@@ -773,6 +773,7 @@ def test_progress_of_a_whole_book(tmp_path, chekhov_epub, monkeypatch):
     assert fixing[-1] >= 6 and all(b["percent"] >= fixing[-1] for b in running if b["step"] == "normalize")
     assert len(set(fixing)) > 5, "on before there are pieces to count"
     assert len({b["percent"] for b in running if b["step"] == "tts"}) > 40, "the voicing goes on smoothly"
+    assert not {b["step"] for b in running} & {"ocr", "figures"}, "no scan, no figures: those steps are not shown"
     etas = [b["eta"] for b in running]
     first = next(i for i, e in enumerate(etas) if e is not None)
     assert first > 0 and running[first - 1]["step"] == "extract", "no estimate until the text is read"
@@ -836,6 +837,17 @@ def test_the_cover_and_the_chapters_are_there_before_the_book_is(tmp_path, chekh
     assert (w.settings.library / book_id / "cover.jpg").read_bytes() == b"\xff\xd8cover"
     done = w.library.details(w.library.get(book_id))
     assert done["chapters"] == [{"title": "Первая", "start": 0.0}] and done["has_cover"]
+
+
+def test_a_step_is_shown_only_when_the_book_has_something_for_it(tmp_path):
+    book = Book(tmp_path)
+    assert not worker.applies(book, "ocr") and not worker.applies(book, "figures") and worker.applies(book, "tts")
+    book.write("scan.json", {"pages": []})
+    assert worker.applies(book, "ocr")
+    book.write("text.json", {"chapters": [], "figures": []})
+    assert not worker.applies(book, "figures")
+    book.write("text.json", {"chapters": [], "figures": [{"image": "figures/a.png"}]})
+    assert worker.applies(book, "figures")
 
 
 def test_a_second_take_is_not_another_piece(tmp_path):
