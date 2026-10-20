@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { lib } from './lib/state.svelte';
-  import { url, type Book } from './lib/api';
+  import type { Book } from './lib/api';
   import { books, fmt, fmtShort, fmtSpeed, gb, left, stage } from './lib/text';
   import { ED, EIO, EO, inset, reveal, rise, still } from './lib/motion';
   import { press } from './lib/press';
@@ -81,7 +81,7 @@
       );
     }
     reveal(bookEl.querySelector('.hero2 h2'), 160, 55);
-    rise([...bookEl.querySelectorAll('.hero2 .mono,.wk,.time,.scrub,.ctl,.dl,.chh,.chl')], 260, 60, 20);
+    rise([...bookEl.querySelectorAll('.hero2 .mono,.wk,.time,.scrub,.ctl,.chh,.chl')], 260, 60, 20);
   }
 
   function hide() {
@@ -365,10 +365,6 @@
             >
             <button class="sk mono" aria-label="Вперёд на 30 секунд" onclick={() => lib.skip(open.id, 30)}>+30</button>
           </div>
-          <div class="dl">
-            <a class="pill mono" href={url.m4b(open.id)} download>Скачать m4b</a>
-            {#if open.has_epub}<a class="pill mono" href={url.epub(open.id)} download>Скачать EPUB</a>{/if}
-          </div>
           <div class="chh mono"><span>Главы</span><span>{ch.length || ''}</span></div>
           <div class="chl" bind:this={chl}>
             {#each ch as c, i (i)}
@@ -441,20 +437,6 @@
     flex-direction: column;
     gap: 8px;
     margin-top: 26px;
-  }
-  .dl {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-top: 22px;
-  }
-  .dl a:active {
-    transform: scale(0.96);
-  }
-  .dl a + a {
-    background: none;
-    color: inherit;
-    box-shadow: inset 0 0 0 1.2px currentColor;
   }
   .toc {
     display: grid;

@@ -2,7 +2,7 @@
   import { tick } from 'svelte';
   import { MediaQuery } from 'svelte/reactivity';
   import { lib } from './lib/state.svelte';
-  import { url, type Book } from './lib/api';
+  import type { Book } from './lib/api';
   import { books, fmt, fmtShort, fmtSpeed, gb, left, stage } from './lib/text';
   import { ED, EO, inset, reveal, rise, still } from './lib/motion';
   import Cover from './lib/Cover.svelte';
@@ -55,7 +55,7 @@
     if (r) bookEl.animate([{ clipPath: inset(r, m, ' round 12px') }, { clipPath: 'inset(0px round 0px)' }], { duration: 560, easing: ED });
     plib.animate([{ transform: 'none', opacity: 1 }, { transform: 'scale(.97)', opacity: 0.3 }], { duration: 560, easing: ED, fill: 'forwards' });
     reveal(bookEl.querySelector('.hero2 h2'), 160, 55);
-    rise([...bookEl.querySelectorAll('.pside .hero2 .mono,.pside .wk,.pside .dl,.pside .chh,.pchl,.prh,.prd article')], 240, 60, 18);
+    rise([...bookEl.querySelectorAll('.pside .hero2 .mono,.pside .wk,.pside .chh,.pchl,.prh,.prd article')], 240, 60, 18);
   }
 
   async function hide() {
@@ -270,12 +270,7 @@
             </div>
             <Cover book={open} />
           </div>
-          {#if open.state === 'done'}
-            <div class="dl">
-              <a class="pill mono" href={url.m4b(open.id)} download>Скачать m4b</a>
-              {#if open.has_epub}<a class="pill mono" href={url.epub(open.id)} download>Скачать EPUB</a>{/if}
-            </div>
-          {:else}
+          {#if open.state !== 'done'}
             <div class="wk">
               <span class="mono">{stage(open)}</span>
               <div class="bar"><i style:--p={open.percent / 100}></i></div>
@@ -380,20 +375,6 @@
     flex-direction: column;
     gap: 8px;
     margin-top: 24px;
-  }
-  .dl {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-top: 22px;
-  }
-  .dl a:active {
-    transform: scale(0.96);
-  }
-  .dl a + a {
-    background: none;
-    color: inherit;
-    box-shadow: inset 0 0 0 1.2px currentColor;
   }
   .toc {
     display: grid;
