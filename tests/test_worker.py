@@ -680,6 +680,28 @@ def test_two_callers_at_once(served):
     assert results == [[]] * 8
 
 
+def test_callers_wait_while_the_worker_is_slow_to_take_them(tmp_path, sock):
+    """A burst of callers while the worker takes no connections: each is let in and answered."""
+    w = make(tmp_path, sock=sock)
+    server = w.serve()
+    server.shutdown()  # the socket listens, nothing takes its connections
+    conns = []
+    try:
+        for _ in range(64):
+            conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            conns.append(conn)
+            conn.settimeout(contract.ANSWER_TIMEOUT)
+            conn.connect(str(w.settings.worker_socket))
+            conn.sendall(contract.request("library.list"))
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        assert [json.loads(conn.makefile("rb").readline()) for conn in conns] == [{"ok": True, "result": []}] * 64
+    finally:
+        for conn in conns:
+            conn.close()
+        server.shutdown()
+        server.server_close()
+
+
 # progress
 
 # the steps of a 132-page book of 256 639 characters as they went on the card, seconds

@@ -16,6 +16,7 @@ import math
 import os
 import queue
 import shutil
+import socket
 import socketserver
 import stat
 import subprocess
@@ -410,6 +411,9 @@ class Worker:
 
 class _Server(socketserver.ThreadingUnixStreamServer):
     daemon_threads = True
+    # a caller with a timeout is turned away at once (EAGAIN) by a Unix socket whose
+    # queue is full, not kept waiting: the queue takes a burst, not socketserver's five
+    request_queue_size = socket.SOMAXCONN
     worker: Worker
 
 
