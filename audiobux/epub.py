@@ -2,12 +2,12 @@
 
 The text is the corrected reading text of the `fix` step: digits stay digits, no
 stress marks. Its blocks come from `reading`: chapters are those of the m4b, deeper
-headings those of the book's outline. The table of contents lists the chapters in
-one level, as the player does. Where the audiobook reads a figure description, the
-EPUB shows the picture cut from the book, with the description as its alt text and
-the book's caption under it; a listing is shown as code, as the book prints it. The
-cover is the m4b's cover. A source that is a reading copy itself (an EPUB) is not
-rebuilt: it goes out as it came in.
+headings those of the book's outline. The table of contents lists every chapter in
+one level, as the player does, an untitled one under the book's title. Where the
+audiobook reads a figure description, the EPUB shows the picture cut from the book,
+with the description as its alt text and the book's caption under it; a listing is
+shown as code, as the book prints it. The cover is the m4b's cover. A source that is
+a reading copy itself (an EPUB) is not rebuilt: it goes out as it came in.
 """
 
 import html
@@ -89,13 +89,13 @@ def write(
                 body.append(f"<pre><code>{html.escape(block.text)}</code></pre>")
             else:
                 body.append(f"<p>{html.escape(block.text)}</p>")
-        doc = epub.EpubHtml(title=chapter.title or title, file_name=file, lang="ru")
+        named = chapter.title or title
+        doc = epub.EpubHtml(title=named, file_name=file, lang="ru")
         doc.content = "\n".join(body)
         doc.add_link(href="../style.css", rel="stylesheet", type="text/css")
         book.add_item(doc)
         docs.append(doc)
-        if chapter.title:
-            toc.append(epub.Link(file, chapter.title, f"toc{n}"))
+        toc.append(epub.Link(file, named, f"toc{n}"))
 
     book.toc = toc
     book.add_item(epub.EpubNcx())

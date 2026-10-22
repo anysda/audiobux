@@ -164,6 +164,24 @@ def test_printed_contents_make_no_entries_of_the_nav(tmp_path):
     assert nav(tmp_path / "b.epub") == [("Книга", []), (lines[0], []), (lines[2], [])]
 
 
+def test_every_chapter_is_in_the_nav_the_first_one_named_like_the_book(tmp_path):
+    data = {
+        "title": "Книга",
+        "author": "Автор",
+        "outline": [],
+        "chapters": [
+            {"title": "", "paragraphs": ["Автор Книга", "Издательство"]},
+            {"title": "Начало", "paragraphs": ["Начало", "Текст."]},
+            {"title": "Конец", "paragraphs": ["Конец", "Последний текст."]},
+        ],
+    }
+    # a book read again is named after its title, so the title is the file's name
+    epub.write(data, [], tmp_path, tmp_path / "b.epub", "Книга.pdf")
+    got = nav(tmp_path / "b.epub")
+    assert got == [("Книга", []), ("Начало", []), ("Конец", [])]
+    assert len(got) == len(data["chapters"]), "one entry for every chapter of the m4b"
+
+
 def test_a_figure_the_text_lost_is_left_out(tmp_path):
     pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 200, 120), 0)
     pix.clear_with(200)
