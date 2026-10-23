@@ -43,6 +43,9 @@ ADDED = {
     "worked": "real not null default 0",
     # the version of the reading the book was finished with, see `refresh`
     "parse": "integer not null default 0",
+    # the name of the file the book came in, without its extension: the title it is
+    # given until its text says otherwise; null for a book finished before it was kept
+    "name": "text",
 }
 
 UNFINISHED = "('queued', 'running', 'paused')"
@@ -64,6 +67,8 @@ class Library:
         for name, kind in ADDED.items():
             if name not in has:
                 self.db.execute(f"alter table books add column {name} {kind}")
+        if "name" not in has:  # a book not yet finished still has the title its file gave it
+            self.db.execute("update books set name = title where state != 'done'")
 
     def _rows(self, sql: str, args: tuple[object, ...] = ()) -> list[sqlite3.Row]:
         with self._lock:
@@ -78,8 +83,8 @@ class Library:
         now = time.time()
         with self._lock:
             self.db.execute(
-                "insert into books (id, sha, format, title, added, updated) values (?, ?, ?, ?, ?, ?)",
-                (book_id, sha, kind, title, now, now),
+                "insert into books (id, sha, format, title, name, added, updated) values (?, ?, ?, ?, ?, ?, ?)",
+                (book_id, sha, kind, title, title, now, now),
             )
         return book_id
 

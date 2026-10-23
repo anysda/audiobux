@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 import pymupdf
+import pytest
 import soundfile as sf
 from conftest import cover_jpeg, stories
 from test_pipeline import context, probe
@@ -107,7 +108,7 @@ def test_a_failed_reading_leaves_the_book_as_it_was(tmp_path, chekhov_pdf, monke
     folder = w.settings.library / book_id
     files = {p.name: p.read_bytes() for p in folder.iterdir() if p.is_file()}
 
-    def broken(folder, name, work, ctx):
+    def broken(folder, name, work, ctx, had):
         (work / "half").mkdir(parents=True)
         raise RuntimeError("bad file")
 
@@ -164,6 +165,69 @@ def old_sync(paragraphs: list[str], name: str) -> dict:
         "duration": float(len(paragraphs)),
         "chapters": [{"title": name, "t0": 0.0, "t1": 9.0, "blocks": [head, *blocks]}],
     }
+
+
+def titled_pdf(path: Path) -> None:
+    """One chapter with no heading of its own, the title and the author in the metadata."""
+    plain_pdf(path, stories()[0][1])
+    with pymupdf.open(path) as doc:
+        doc.set_metadata({"title": "Рассказы", "author": "Антон Чехов"})
+        doc.saveIncr()
+
+
+def chapter_titles(w, book_id: str) -> tuple[list[str], ...]:
+    """The chapters of a book as the list, the sync and the m4b have them."""
+    folder = w.settings.library / book_id
+    synced = json.loads((folder / "sync.json").read_text())
+    return (
+        [c["title"] for c in json.loads(state(w, book_id)["chapters"])],
+        [c["title"] for c in synced["chapters"]],
+        [c["tags"]["title"] for c in probe(folder / "book.m4b")["chapters"]],
+    )
+
+
+@pytest.mark.parametrize("named", ["Чехов - Рассказы", "scan_0001", ""])
+def test_reading_again_finds_what_the_first_reading_did(tmp_path, named):
+    """The file's name is the one it came with, not the title found in the book since:
+    a chapter named after the book keeps that name."""
+    source = tmp_path / "book.pdf"
+    titled_pdf(source)
+    w = make(tmp_path / "w")
+    book_id = w.submit(upload(w, source), named)["id"]
+    w.run(until_idle=True)
+    first = chapter_titles(w, book_id)
+    assert first == (["Рассказы"],) * 3
+    w.library.update(book_id, parse=0)
+
+    w.run(until_idle=True)
+
+    got = state(w, book_id)
+    assert (got["title"], got["author"], got["parse"]) == ("Рассказы", "Антон Чехов", refresh.VERSION)
+    assert chapter_titles(w, book_id) == first
+
+
+def test_a_book_finished_before_its_file_name_was_kept(tmp_path):
+    """No name to tell the title from: the title found is the first chapter's; the title
+    and the author nothing in the book gives stay as they were, the title being the
+    first chapter's too, as nothing tells it came from the file's name."""
+    source = tmp_path / "book.pdf"
+    titled_pdf(source)
+    plain = tmp_path / "plain.pdf"
+    plain_pdf(plain, stories()[1][1])
+    w = make(tmp_path / "w")
+    titled, untitled = (w.submit(upload(w, s), "scan_0001")["id"] for s in (source, plain))
+    w.run(until_idle=True)
+    assert chapter_titles(w, untitled) == ([""],) * 3
+    for book_id in (titled, untitled):
+        w.library.update(book_id, parse=0, name=None)
+    w.library.update(untitled, author="Чехов")
+
+    w.run(until_idle=True)
+
+    assert chapter_titles(w, titled) == (["Рассказы"],) * 3
+    got = state(w, untitled)
+    assert (got["title"], got["author"], got["parse"]) == ("scan 0001", "Чехов", refresh.VERSION)
+    assert chapter_titles(w, untitled) == (["scan 0001"],) * 3
 
 
 def test_a_book_without_chapters_and_without_its_m4b(tmp_path):

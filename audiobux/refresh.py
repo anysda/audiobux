@@ -27,7 +27,7 @@ from .pipeline import Context
 log = logging.getLogger(__name__)
 
 # the reading a book is done with; a finished book with a smaller one is read again
-VERSION = 3
+VERSION = 4
 # A heading is told from its line in a table of contents by what follows it: the first
 # paragraphs of the chapter are looked for among the blocks after it (an older reading
 # may have put a page's blocks out of order), by their first characters
@@ -38,17 +38,19 @@ FOLLOWING_MATCH = 60
 Timed = list[dict[str, Any]]  # sentences with their t0 and t1
 
 
-def run(folder: Path, name: str, work: Path, ctx: Context) -> dict[str, Any]:
+def run(folder: Path, name: str, work: Path, ctx: Context, had: tuple[str, str] = ("", "")) -> dict[str, Any]:
     """Reads the book in `folder` again; `work` is for what is made on the way. Returns
     its title, author and, if it has a `sync.json`, chapters with their start; the files
-    in `folder` are replaced only once everything is made."""
+    in `folder` are replaced only once everything is made. The title and the author it
+    `had` stay where neither the book nor `name` gives one."""
     work.mkdir(parents=True, exist_ok=True)
     source = next(folder.glob("source.*"))
     doc = formats.read(source, work, ctx.settings.toc_depth)
     try:
-        title, author = titlepage.find(doc, source, name, ctx.models.llm, ctx.quiet.wait)
+        read = titlepage.find(doc, source, name, ctx.models.llm, ctx.quiet.wait)
     finally:
         ctx.models.release_llm()
+    title, author = (now or before for now, before in zip(read, had, strict=True))
     found: dict[str, Any] = {"title": title, "author": author}
     if not (folder / "sync.json").exists():
         return found

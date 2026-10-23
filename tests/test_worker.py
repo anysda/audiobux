@@ -913,11 +913,17 @@ def test_a_database_from_before_gets_the_new_columns(tmp_path):
     old = sqlite3.connect(settings.db)
     old.executescript(library.SCHEMA)
     old.execute("insert into books (id, sha, format, added, updated) values ('a', 's', 'epub', 0, 0)")
+    old.execute(
+        "insert into books (id, sha, format, title, state, added, updated) values ('b', 't', 'pdf', 'X', 'done', 0, 0)"
+    )
     old.commit()
     old.close()
     lib = library.Library(settings)
     assert (lib.info(lib.get("a"))["percent"], lib.info(lib.get("a"))["eta"]) == (0, None)
-    library.Library(settings)  # and again, with the columns already there
+    assert (lib.get("a")["name"], lib.get("b")["name"]) == ("", None), "a finished book's file name is not known"
+    lib.update("a", name="Чехов - Рассказы")
+    again = library.Library(settings)  # and again, with the columns already there
+    assert again.get("a")["name"] == "Чехов - Рассказы"
 
 
 def test_the_contract_names_the_steps_in_their_order():

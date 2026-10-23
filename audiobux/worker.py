@@ -112,7 +112,7 @@ class Worker:
             with self.lock:
                 row = None if left or not self.fetch.ready else self.library.next()
                 if row:
-                    self.current, self.deleted = (row["id"], self._workdir(row["id"], row["title"])), False
+                    self.current, self.deleted = (row["id"], self._workdir(row["id"], row["name"])), False
             if self.current:
                 self.voice(*self.current)
                 continue
@@ -166,8 +166,10 @@ class Worker:
         fields: dict[str, object] = {"parse": refresh.VERSION}
         log.info("%s: reading again", book_id)
         try:
-            name = (row["title"] or "Без названия") + next(folder.glob("source.*")).suffix
-            found = refresh.run(folder, name, work, self.ctx)
+            # read with the name of its file, as the first time; a book finished before
+            # that name was kept is read with none, the title found is not taken for it
+            name = "" if row["name"] is None else file_name(row["name"], next(folder.glob("source.*")))
+            found = refresh.run(folder, name, work, self.ctx, (row["title"], row["author"]))
             fields |= {"title": found["title"], "author": found["author"]}
             if "chapters" in found:
                 fields["chapters"] = json.dumps(found["chapters"], ensure_ascii=False)
@@ -183,7 +185,7 @@ class Worker:
         """Takes every model off the card; each one loads itself again when used."""
         unload(self.ctx.models, self._lazy)
 
-    def _workdir(self, book_id: str, title: str) -> Book:
+    def _workdir(self, book_id: str, name: str) -> Book:
         """The book's working directory, its source linked from the library."""
         book = Book(self.settings.work / book_id)
         book.dir.mkdir(exist_ok=True)
@@ -191,8 +193,7 @@ class Worker:
         link = book.dir / source.name
         if not link.is_symlink():
             link.symlink_to(os.path.relpath(source, book.dir))
-            # the name stands in for a title when the file has none of its own
-            book.path("name").write_text((title or "Без названия") + source.suffix)
+            book.path("name").write_text(file_name(name, source))
         return book
 
     def _begin(self, book_id: str, book: Book, step: str) -> None:
@@ -446,6 +447,12 @@ class _Handler(socketserver.StreamRequestHandler):
         except Exception:
             log.exception("socket: %s failed", method)
             return contract.refusal("internal")
+
+
+def file_name(name: str, source: Path) -> str:
+    """The name of a book's file, as the reading takes it: it stands in for a title when
+    the file has none of its own."""
+    return (name or "Без названия") + source.suffix
 
 
 def about(book: Book) -> dict[str, str]:
