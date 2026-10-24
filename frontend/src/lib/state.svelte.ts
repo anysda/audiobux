@@ -319,7 +319,8 @@ class Library {
     } else a.pause();
   }
 
-  seek(id: string, t: number) {
+  // `keep`: the new place is kept at once, playing or not
+  seek(id: string, t: number, keep = false) {
     this.load(id);
     const b = this.book(id);
     const end = this.length(b!) || t;
@@ -330,7 +331,7 @@ class Library {
       a.onloadedmetadata = () => {
         a.currentTime = this.pos;
       };
-    if (a.paused) this.#save();
+    if (keep || a.paused) this.#save();
   }
 
   skip(id: string, by: number) {

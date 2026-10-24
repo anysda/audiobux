@@ -43,7 +43,7 @@
     // the chapter's own heading is its title, shown once
     const body = (c: { title: string; blocks: Block[] }) =>
       c.blocks.filter((b, j) => !(j === 0 && b.type === 'h' && b.text === c.title));
-    const chapters = (sync?.chapters ?? []).map((c) => ({ title: c.title, pieces: body(c).map(piece) }));
+    const chapters = (sync?.chapters ?? []).map((c) => ({ title: c.title, t0: c.t0, pieces: body(c).map(piece) }));
     return { chapters, times };
   });
 
@@ -150,6 +150,28 @@
     arrow?.classList.add('off');
   }
 
+  // a tap on a piece heard, or on a chapter's title, sends the voice there and the text follows it again;
+  // a drag that selects text, a link or a button keep their own meaning
+  let down = { x: 0, y: 0 };
+  function tap(e: MouseEvent) {
+    const t = e.target as Element;
+    if (t.closest('a, button')) return;
+    const s = t.closest<HTMLElement>('[data-k]');
+    const h = s ? null : t.closest('.ttl') && t.closest('section');
+    const n = h ? [...(box?.querySelectorAll('section') ?? [])].indexOf(h as HTMLElement) : -1;
+    const at = s ? view.times[Number(s.dataset.k)][0] : n >= 0 ? view.chapters[n].t0 : null;
+    const dragged = Math.hypot(e.clientX - down.x, e.clientY - down.y) > 6 || !getSelection()?.isCollapsed;
+    if (at === null || dragged) return off();
+    lib.seek(id, at, true);
+    was = { t: lib.at(id), w: performance.now(), on: lib.playing && lib.cur === id };
+    follow = true;
+    moved = false;
+    if (now >= 0) el(now)?.classList.remove('now');
+    now = find(was.t);
+    if (now >= 0) el(now)?.classList.add('now');
+    place();
+  }
+
   // play after a pause, a skip, the scrub or a chapter sends the voice on: the text goes back to it;
   // while playing and followed it is already there, paused it goes too
   let was: { t: number; w: number; on: boolean } | null = null;
@@ -185,7 +207,8 @@
   bind:this={box}
   style:--pw={pw + 'px'}
   style:--z={lib.zoom / 100}
-  onclick={off}
+  onpointerdown={(e) => (down = { x: e.clientX, y: e.clientY })}
+  onclick={tap}
   onkeydown={(e) => e.key.startsWith('Arrow') && off()}
   onwheel={() => (moved = true)}
   ontouchstart={() => (moved = true)}

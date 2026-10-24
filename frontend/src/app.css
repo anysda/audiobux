@@ -943,6 +943,12 @@ button.pill:active {
   box-decoration-break: clone;
   padding: 1px 0;
 }
+.rd [data-k],
+.prd [data-k],
+.rd .ttl,
+.prd .ttl {
+  cursor: pointer;
+}
 .now {
   background: var(--hl);
   color: var(--hlf);
