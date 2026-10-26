@@ -7,7 +7,6 @@
   import { ED, EO, inset, reveal, rise, still } from './lib/motion';
   import Cover from './lib/Cover.svelte';
   import Title from './lib/Title.svelte';
-  import Silhouette from './lib/Silhouette.svelte';
   import Seg from './lib/Seg.svelte';
   import Scrub from './lib/Scrub.svelte';
   import Reader from './lib/Reader.svelte';
@@ -128,7 +127,6 @@
 <svelte:window onkeydown={key} onpointerdown={outside} />
 
 <div class="pc" class:psel={picking} class:bare={open && !closing}>
-  <Silhouette id="pl" pc />
   {#if !open || closing}
     <header class="ptop">
       <span class="mono">{books(lib.books.length)}</span>
@@ -258,7 +256,6 @@
       {@const ch = lib.chapters(open.id)}
       {@const ci = lib.chapter(open.id)}
       <section class="pbook" bind:this={bookEl}>
-        <Silhouette id="pb" pc />
         <aside class="pside">
           <button class="pback mono" onclick={hide}
             ><svg viewBox="0 0 24 24"><path d="M20 12H5M11 6l-6 6 6 6" /></svg>Библиотека</button

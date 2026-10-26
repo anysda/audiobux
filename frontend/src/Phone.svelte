@@ -7,7 +7,6 @@
   import { press } from './lib/press';
   import Cover from './lib/Cover.svelte';
   import Title from './lib/Title.svelte';
-  import Silhouette from './lib/Silhouette.svelte';
   import Seg from './lib/Seg.svelte';
   import Scrub from './lib/Scrub.svelte';
   import Reader from './lib/Reader.svelte';
@@ -182,7 +181,6 @@
 <svelte:window onkeydown={key} />
 
 <div class="ph" class:sel={picking} bind:this={phone}>
-  <Silhouette id="lb" />
   <section class="lib" bind:this={libEl}>
     <header class="lh">
       <div class="lead"><p class="mono">{books(lib.books.length)}</p></div>
@@ -302,7 +300,6 @@
       data-tab={tab}
       bind:this={bookEl}
     >
-      <Silhouette id="b" />
       <header class="bt">
         <button class="back mono" onclick={hide}>Назад</button>
         {#if open.state === 'done'}

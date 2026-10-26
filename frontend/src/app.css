@@ -18,16 +18,14 @@
   font-display: swap;
 }
 
-/* One look everywhere, taken from the player: dusty-blue field, blurred listener silhouette, white condensed caps, white pills */
+/* One look everywhere, taken from the player: plain blue field, white condensed caps, white pills */
 :root {
   --ink: #0a0a0a;
   --white: #ffffff;
   --slate: #7591ae;
-  --slate-hi: #9ab2ca;
   --sil: #0f1826;
   --display: 'Roboto Flex', 'Arial Narrow', sans-serif;
   --mono: 'IBM Plex Mono', ui-monospace, monospace;
-  --field: radial-gradient(120% 70% at 50% 28%, var(--slate-hi), var(--slate) 55%, #5f7c9a);
   --rule: color-mix(in srgb, var(--white) 30%, transparent);
   --panel: #132033;
   --eo: cubic-bezier(0.23, 1, 0.32, 1);
@@ -144,7 +142,7 @@ button:disabled {
   position: fixed;
   inset: 0;
   overflow: hidden;
-  background: var(--field);
+  background: var(--slate);
   color: var(--white);
   isolation: isolate;
 }
@@ -582,29 +580,12 @@ button.pill:active {
   flex-direction: column;
   z-index: 30;
   color: var(--white);
-  background: var(--field);
+  background: var(--slate);
   transition: color 300ms ease;
 }
 .book.paper[data-tab='1'] {
   background: var(--rbg);
   color: var(--rfg);
-}
-.silh {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  transition: opacity 300ms ease;
-}
-.silh svg {
-  width: 100%;
-  height: 100%;
-  display: block;
-}
-.silh .sg {
-  fill: var(--sil);
-}
-.book[data-tab='1'] .silh {
-  opacity: 0;
 }
 .bt {
   position: relative;
@@ -1188,7 +1169,7 @@ button.pill:active {
   inset: 0;
   min-height: 620px;
   overflow: hidden;
-  background: var(--field);
+  background: var(--slate);
   color: var(--white);
   isolation: isolate;
   display: grid;
@@ -1198,12 +1179,6 @@ button.pill:active {
 .pc ::selection {
   background: var(--white);
   color: var(--ink);
-}
-.pc > .silh {
-  left: auto;
-  right: 14%;
-  width: 44%;
-  opacity: 0.85;
 }
 .ptop,
 .pmain,
@@ -1472,10 +1447,7 @@ button.pill:active {
   inset: 0;
   display: grid;
   grid-template-columns: clamp(340px, 30%, 420px) minmax(0, 1fr);
-  background: var(--field);
-}
-.pbook > .silh {
-  opacity: 0.9;
+  background: var(--slate);
 }
 .pside {
   position: relative;
