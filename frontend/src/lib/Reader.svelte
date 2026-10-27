@@ -71,6 +71,9 @@
 
   const el = (k: number) => box?.querySelector<HTMLElement>(`[data-k="${k}"]`) ?? null;
   const pages = $derived(lib.mode === 1);
+  // pages are cut to the pane's width: until it is measured the text is not laid out at all,
+  // zero-wide columns would give every word its own page and every title a fit over the whole book
+  const chapters = $derived(pages && !pw ? [] : view.chapters);
 
   function place(instant = false) {
     const a = arrow,
@@ -219,7 +222,7 @@
     {#if sync === null}
       <p class="gone mono">Текст этой книги недоступен</p>
     {/if}
-    {#each view.chapters as c, n (n)}
+    {#each chapters as c, n (n)}
       <section>
         <div class="rk mono"><span>Глава {n + 1}</span><span>{book?.author}</span></div>
         <Title text={c.title} max={wide ? 64 : 46} min={wide ? 30 : 24} />
