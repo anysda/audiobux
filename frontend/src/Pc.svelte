@@ -164,7 +164,7 @@
         <div class="phero note">
           <div class="hl">
             <span class="mono">Первый запуск</span>
-            <Title text="Готовлю модели" max={narrow.current ? 104 : 132} min={56} lines={2} />
+            <Title text="Подготовка моделей" max={narrow.current ? 104 : 132} min={56} lines={2} />
             {#if lib.status?.models.total}
               <p class="mono">{gb(lib.status.models.done ?? 0)} из {gb(lib.status.models.total)} ГБ</p>
               <div class="bar"><i style:--p={(lib.status.models.done ?? 0) / lib.status.models.total}></i></div>
@@ -287,7 +287,7 @@
                 <p class="toc"><span class="mono">{String(i + 1).padStart(2, '0')}</span><span>{c.title}</span></p>
               {/if}
             {:else}
-              <p class="mono none">Оглавление появится, когда прочитаю файл</p>
+              <p class="mono none">Оглавление появится после чтения файла</p>
             {/each}
           </div>
         </aside>

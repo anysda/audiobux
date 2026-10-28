@@ -26,17 +26,17 @@ export const gb = (bytes: number) => (bytes / 1e9).toFixed(1).replace('.', ',');
 export const letter = (title: string) => (title.trim()[0] ?? '·').toUpperCase();
 
 const STEPS: Record<string, string> = {
-  extract: 'Читаю файл',
-  ocr: 'Распознаю текст',
-  figures: 'Описываю рисунки',
-  fix: 'Правлю текст',
-  epub: 'Собираю EPUB',
-  normalize: 'Готовлю текст к чтению',
-  chunk: 'Режу на фрагменты',
-  tts: 'Озвучиваю',
-  verify: 'Проверяю на слух',
-  assemble: 'Собираю аудиокнигу',
-  sync: 'Связываю текст и звук',
+  extract: 'Чтение файла',
+  ocr: 'Распознавание текста',
+  figures: 'Описание рисунков',
+  fix: 'Правка текста',
+  epub: 'Сборка EPUB',
+  normalize: 'Подготовка текста к чтению',
+  chunk: 'Нарезка на фрагменты',
+  tts: 'Озвучка',
+  verify: 'Проверка на слух',
+  assemble: 'Сборка аудиокниги',
+  sync: 'Связка текста и звука',
 };
 
 // what the worker is busy with, in words; a book short of done never reads 100%

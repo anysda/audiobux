@@ -189,7 +189,7 @@
       {#if !lib.ready}
         <div class="hero note">
           <div class="hm mono"><span>Первый запуск</span></div>
-          <Title class="h-t" text="Готовлю модели" max={60} min={32} />
+          <Title class="h-t" text="Подготовка моделей" max={60} min={32} />
           {#if lib.status?.models.total}
             <p class="mono">{gb(lib.status.models.done ?? 0)} из {gb(lib.status.models.total)} ГБ</p>
             <div class="bar"><i style:--p={(lib.status.models.done ?? 0) / lib.status.models.total}></i></div>
@@ -334,7 +334,7 @@
             {#each ch as c, i (i)}
               <p class="toc"><span class="mono">{String(i + 1).padStart(2, '0')}</span><span>{c.title}</span></p>
             {:else}
-              <p class="mono none">Оглавление появится, когда прочитаю файл</p>
+              <p class="mono none">Оглавление появится после чтения файла</p>
             {/each}
           </div>
         </div>
