@@ -1072,6 +1072,7 @@ button.pill:active {
 .seg {
   position: relative;
   display: flex;
+  container-type: inline-size;
   border-radius: 999px;
   background: color-mix(in srgb, var(--white) 10%, transparent);
   padding: 4px;
@@ -1097,6 +1098,8 @@ button.pill:active {
   font-stretch: 34%;
   text-transform: uppercase;
   transition: color 200ms ease;
+  /* the longest word fits its cell on a narrow phone */
+  font-size: min(17px, (100cqw - 8px) / var(--n) / 6.6);
 }
 .seg button[aria-pressed='true'] {
   color: var(--ink);
