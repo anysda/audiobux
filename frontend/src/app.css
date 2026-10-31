@@ -1003,6 +1003,11 @@ button.pill:active {
   overflow-y: hidden;
   padding: 0;
 }
+/* the finger turns pages through Reader's own swipe, the browser only zooms */
+.rd.pages,
+.prd.pages {
+  touch-action: pinch-zoom;
+}
 .rd.pages article {
   height: 100%;
   padding: 8px 20px 40px 44px;

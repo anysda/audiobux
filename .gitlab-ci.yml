@@ -22,6 +22,7 @@ frontend:
     - npm --prefix frontend ci --no-audit --no-fund
     - npm --prefix frontend run check
     - npm --prefix frontend run lint
+    - npm --prefix frontend test
     - npm --prefix frontend run build
 
 ruff:

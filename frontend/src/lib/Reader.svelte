@@ -3,6 +3,7 @@
   import { lib } from './state.svelte';
   import { url, type Block } from './api';
   import { still } from './motion';
+  import { turn } from './swipe';
   import Title from './Title.svelte';
 
   let { id, wide = false }: { id: string; wide?: boolean } = $props();
@@ -107,6 +108,8 @@
     if (!first && (!lib.playing || lib.cur !== id || !follow)) return;
     const behavior = first || still() ? 'auto' : 'smooth';
     if (pages) {
+      // a finger on the page, or a page still turning, is not taken away from the reader
+      if (g?.on || glide) return;
       if (pg * W !== b.scrollLeft) b.scrollTo({ left: pg * W, behavior });
     } else {
       const top = r.top - rr.top;
@@ -140,11 +143,65 @@
     return () => ro.disconnect();
   });
 
-  // pages settle on a whole page after a swipe
+  // pages settle on a whole page after the wheel or the keys moved them
   function settle() {
-    if (!pages || !box) return;
+    if (!pages || !box || g || glide) return;
     const W = box.clientWidth;
     box.scrollTo({ left: Math.round(box.scrollLeft / W) * W, behavior: still() ? 'auto' : 'smooth' });
+  }
+
+  // a finger turns one page per swipe: the text follows it, and on release goes to the page `turn` picks.
+  // the browser's own pan is off (touch-action), its fling would fly over several pages
+  let g: { id: number; x: number; y: number; t: number; left: number; on: boolean } | null = null;
+  let glide = 0;
+  let swiped = false;
+  function grab(e: PointerEvent) {
+    swiped = false;
+    if (!pages || !box || e.pointerType === 'mouse' || !e.isPrimary) return;
+    cancelAnimationFrame(glide);
+    glide = 0;
+    g = { id: e.pointerId, x: e.clientX, y: e.clientY, t: e.timeStamp, left: box.scrollLeft, on: false };
+  }
+  function drag(e: PointerEvent) {
+    if (!g || !box || e.pointerId !== g.id) return;
+    const dx = e.clientX - g.x,
+      dy = e.clientY - g.y;
+    if (!g.on) {
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+      // across is a page turn; down, or a selection being drawn, is not
+      if (Math.abs(dy) >= Math.abs(dx) || !getSelection()?.isCollapsed) return void (g = null);
+      g.on = true;
+      moved = true;
+      box.setPointerCapture(e.pointerId);
+    }
+    box.scrollLeft = g.left - dx;
+  }
+  function drop(e: PointerEvent) {
+    if (!g || !box || e.pointerId !== g.id) return;
+    const s = g;
+    g = null;
+    if (!s.on) return;
+    swiped = true;
+    const W = box.clientWidth;
+    const from = Math.round(s.left / W);
+    const to = e.type === 'pointercancel' ? from : turn(from, Math.round(box.scrollWidth / W) - 1, e.clientX - s.x, e.timeStamp - s.t, W);
+    go(to * W);
+  }
+  // a short ease out to `left`, quicker than the browser's own smooth scroll
+  function go(left: number) {
+    const b = box;
+    if (!b) return;
+    const x0 = b.scrollLeft,
+      d = left - x0;
+    if (still() || !d) return void (b.scrollLeft = left);
+    const t0 = performance.now(),
+      ms = 220;
+    const step = (now: number) => {
+      const k = Math.min((now - t0) / ms, 1);
+      b.scrollLeft = x0 + d * (1 - (1 - k) ** 3);
+      glide = k < 1 ? requestAnimationFrame(step) : 0;
+    };
+    glide = requestAnimationFrame(step);
   }
 
   function off() {
@@ -159,6 +216,7 @@
   function tap(e: MouseEvent) {
     const t = e.target as Element;
     if (t.closest('a, button')) return;
+    if (swiped) return void (swiped = false);
     const s = t.closest<HTMLElement>('[data-k]');
     const h = s ? null : t.closest('.ttl') && t.closest('section');
     const n = h ? [...(box?.querySelectorAll('section') ?? [])].indexOf(h as HTMLElement) : -1;
@@ -210,7 +268,13 @@
   bind:this={box}
   style:--pw={pw + 'px'}
   style:--z={lib.zoom / 100}
-  onpointerdown={(e) => (down = { x: e.clientX, y: e.clientY })}
+  onpointerdown={(e) => {
+    down = { x: e.clientX, y: e.clientY };
+    grab(e);
+  }}
+  onpointermove={drag}
+  onpointerup={drop}
+  onpointercancel={drop}
   onclick={tap}
   onkeydown={(e) => e.key.startsWith('Arrow') && off()}
   onwheel={() => (moved = true)}
