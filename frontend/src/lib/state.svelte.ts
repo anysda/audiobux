@@ -1,6 +1,9 @@
 import { api, ApiError, url, type Book, type BookDetails, type Listening, type Status, type Sync } from './api';
 
 const SAVE_EVERY = 5000;
+// the events stream: asked again this long after it is refused; trusted no longer than its pings (15 s)
+const AGAIN = 5000;
+const QUIET = 20000;
 
 class Library {
   books = $state<Book[]>([]);
@@ -28,6 +31,9 @@ class Library {
   #saved = 0;
   #frame = 0;
   #poll = 0;
+  #es: EventSource | null = null;
+  #again = 0;
+  #hidden = 0;
 
   get done() {
     return this.books.filter((b) => b.state === 'done');
@@ -86,13 +92,35 @@ class Library {
   }
 
   start() {
+    this.#wake();
+    addEventListener('pagehide', () => this.#save(true));
+    // a phone puts the page away and gives it back as it was: what moved meanwhile is asked for again
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') this.#hidden = Date.now();
+      // a stream quiet for longer than its pings may be dead with nothing said
+      else this.#wake(Date.now() - this.#hidden > QUIET);
+    });
+    addEventListener('pageshow', (e) => e.persisted && this.#wake(true));
+  }
+
+  #wake(anew = false) {
     void this.refresh();
     void this.loadStatus();
-    const es = new EventSource('/api/events');
+    if (anew || !this.#es || this.#es.readyState === EventSource.CLOSED) this.#listen();
+  }
+
+  #listen() {
+    clearTimeout(this.#again);
+    this.#es?.close();
+    const es = (this.#es = new EventSource('/api/events'));
     es.onopen = () => void this.refresh();
+    // the browser comes back by itself after a cut, but not after an answer that is no
+    // stream (the worker restarting, the sign-in page): then it is asked again here
+    es.onerror = () => {
+      if (es.readyState === EventSource.CLOSED && this.#es === es) this.#again = setTimeout(() => this.#listen(), AGAIN);
+    };
     es.addEventListener('book', (e) => this.#upsert(JSON.parse((e as MessageEvent).data).book));
     es.addEventListener('deleted', (e) => this.#drop(JSON.parse((e as MessageEvent).data).id));
-    addEventListener('pagehide', () => this.#save(true));
   }
 
   async refresh() {

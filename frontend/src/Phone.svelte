@@ -164,6 +164,51 @@
     dy = 0;
   }
 
+  // pulled down from the top, the list is asked for again
+  const PULL = 56;
+  let py: number | null = null;
+  let pull = $state(0);
+  let held = $state(false);
+  let asking = $state(false);
+  function pullFrom(e: TouchEvent) {
+    py = libEl && libEl.scrollTop <= 0 && !asking && e.touches.length === 1 ? e.touches[0].clientY : null;
+  }
+  function pullBy(e: TouchEvent) {
+    if (py === null || !libEl) return;
+    const d = e.touches[0].clientY - py;
+    if (d <= 0 || libEl.scrollTop > 0) {
+      py = null;
+      held = false;
+      pull = 0;
+      return;
+    }
+    held = true;
+    pull = Math.min(PULL * 1.5, d / 2);
+  }
+  $effect(() => {
+    const el = libEl;
+    if (!el) return;
+    const on: [string, (e: TouchEvent) => void][] = [
+      ['touchstart', pullFrom],
+      ['touchmove', pullBy],
+      ['touchend', () => void pullDone()],
+      ['touchcancel', () => void pullDone()],
+    ];
+    for (const [t, f] of on) el.addEventListener(t, f as EventListener, { passive: true });
+    return () => on.forEach(([t, f]) => el.removeEventListener(t, f as EventListener));
+  });
+  async function pullDone() {
+    if (py === null) return;
+    py = null;
+    held = false;
+    if (pull < PULL) return void (pull = 0);
+    asking = true;
+    pull = PULL;
+    await Promise.all([lib.refresh(), lib.loadStatus()]);
+    asking = false;
+    pull = 0;
+  }
+
   function key(e: KeyboardEvent) {
     if (e.key !== 'Escape') return;
     if (sheet) closeSheet();
@@ -185,6 +230,9 @@
     <header class="lh">
       <div class="lead"><p class="mono">{books(lib.books.length)}</p></div>
     </header>
+    <div class="pull mono" class:held class:go={pull >= PULL} style:height="{pull}px" aria-hidden="true">
+      <span>{asking ? 'Обновление' : pull >= PULL ? 'Отпустите' : 'Обновить'}</span>
+    </div>
     <div bind:this={list}>
       {#if !lib.ready}
         <div class="hero note">

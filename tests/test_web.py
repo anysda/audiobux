@@ -385,6 +385,9 @@ def test_events_stream(client, worker, chekhov_epub):
     with client.stream("GET", "/api/events") as events:
         assert events.headers["content-type"].startswith("text/event-stream")
         assert events.headers["x-content-type-options"] == "nosniff"
+        # a proxy that buffers or keeps the stream would hold the progress back
+        assert events.headers["cache-control"] == "no-cache"
+        assert events.headers["x-accel-buffering"] == "no"
         book_id = submit(worker, chekhov_epub)
         lines = events.iter_lines()
         assert next(lines) == "event: book"
@@ -462,6 +465,24 @@ def test_the_interface_is_served_and_any_other_path_is_its_page(worker, frontend
     assert script.text == "console.log(1)" and "javascript" in script.headers["content-type"]
     for path in ("/api", "/api/", "/api/nothing", "/api/books/x/y/z"):
         assert client.get(path).json() == {"detail": "not-found"}, path
+
+
+def test_the_page_and_the_answers_about_books_are_never_kept(client, worker, frontend, chekhov_epub):
+    pages = client_for(dataclasses.replace(worker.settings, frontend=frontend))
+    for path in ("/", "/index.html", "/books/abc"):
+        assert pages.get(path).headers["cache-control"] == "no-store", path
+    assert "no-store" not in pages.get("/assets/app.js").headers.get("cache-control", "")
+    book_id = submit(worker, chekhov_epub)
+    for path in ("/api/books", f"/api/books/{book_id}", "/api/status", "/api/listening", "/api/books/x"):
+        assert client.get(path).headers["cache-control"] == "no-store", path
+    moved = client.put(f"/api/books/{book_id}/position", json={"seconds": 1})
+    assert moved.headers["cache-control"] == "no-store"
+
+
+def test_files_of_a_book_keep_their_validators(client, m4b):
+    got = client.get(f"/api/books/{m4b}/audio")
+    assert got.status_code == 200 and got.headers["etag"]
+    assert "cache-control" not in got.headers
 
 
 def test_without_the_interface_built_it_is_404_and_the_api_works(worker, tmp_path):

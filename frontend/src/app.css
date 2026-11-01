@@ -173,6 +173,24 @@ button:disabled {
   margin: 0;
   font-size: 10.5px;
 }
+.pull {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  font-size: 10.5px;
+  white-space: nowrap;
+  opacity: 0.55;
+  transition:
+    height 240ms ease,
+    opacity 200ms ease;
+}
+.pull.held {
+  transition: opacity 200ms ease;
+}
+.pull.go {
+  opacity: 1;
+}
 
 .bk {
   position: relative;

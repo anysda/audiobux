@@ -277,7 +277,9 @@ def create(settings: Settings) -> FastAPI:
             stream = await contract.subscribe(socket)
         except contract.Fault as f:
             raise HTTPException(STATUS.get(f.error, 502), f.error) from None
-        return StreamingResponse(_sse(stream), media_type="text/event-stream")
+        # nothing between the worker and the page may keep the stream back or keep it
+        headers = {"cache-control": "no-cache", "x-accel-buffering": "no"}
+        return StreamingResponse(_sse(stream), media_type="text/event-stream", headers=headers)
 
     @app.get("/{path:path}", include_in_schema=False)
     def page(path: str) -> Response:
@@ -287,17 +289,19 @@ def create(settings: Settings) -> FastAPI:
             raise HTTPException(404, "not-found")
         root = settings.frontend.resolve()
         target = (root / path).resolve()
-        if target.is_relative_to(root) and target.is_file():
+        if target.is_relative_to(root) and target.is_file() and target != root / "index.html":
             return FileResponse(target)
         if not (root / "index.html").is_file():
             raise HTTPException(404, "not-found")
-        return FileResponse(root / "index.html")
+        # the page names the scripts of this build: a phone keeping an old one keeps the old interface
+        return FileResponse(root / "index.html", headers={"cache-control": "no-store"})
 
     return app
 
 
 class Guard:
-    """Every answer gets the security headers, refusals and errors included. A request
+    """Every answer gets the security headers, refusals and errors included, and an
+    answer of the API that is not a file is not kept by the browser (`_fresh`). A request
     is refused with 403 when its Host is not this service (DNS rebinding), or when it
     changes something and its Origin is missing or another site (CSRF)."""
 
@@ -314,7 +318,7 @@ class Guard:
             nonlocal started
             if message["type"] == "http.response.start":
                 started = True
-                message["headers"] = [*message.get("headers", ()), *SECURITY]
+                message["headers"] = [*message.get("headers", ()), *SECURITY, *_fresh(scope["path"], message)]
             await send(message)
 
         headers = Headers(scope=scope)
@@ -339,6 +343,15 @@ class Guard:
             return _is_ip(found["v6"])
         name = found["name"]
         return name == "localhost" or name in self.hosts or _is_ip(name)
+
+
+def _fresh(path: str, message: Message) -> list[tuple[bytes, bytes]]:
+    """What the API tells of the books is asked anew every time: an answer kept by the
+    browser shows a book where it was. Files carry their own validators and are left be."""
+    told = {name.lower() for name, _ in message.get("headers", ())}
+    if not path.startswith("/api/") or told & {b"cache-control", b"etag"}:
+        return []
+    return [(b"cache-control", b"no-store")]
 
 
 def _invalid(request: Request, error: Exception) -> JSONResponse:
