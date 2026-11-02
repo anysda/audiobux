@@ -1451,6 +1451,11 @@ button.pill:active {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  /* a dark plate under the stage, so white text reads on a light cover */
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: color-mix(in srgb, #0f1826 62%, transparent);
+  backdrop-filter: blur(8px);
 }
 .dld .bar {
   margin: 0;
