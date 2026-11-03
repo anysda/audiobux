@@ -3,7 +3,7 @@
   import { lib } from './state.svelte';
   import { url, type Block } from './api';
   import { still } from './motion';
-  import { turn } from './swipe';
+  import { hold, REPEAT, step, turn, wheel } from './swipe';
   import Title from './Title.svelte';
 
   let { id, wide = false }: { id: string; wide?: boolean } = $props();
@@ -140,7 +140,12 @@
     void lib.loadSync(id);
     const ro = new ResizeObserver(() => (pw = box?.clientWidth ?? 0));
     if (box) ro.observe(box);
-    return () => ro.disconnect();
+    // not passive: in pages the wheel turns them, the browser's own scroll is held back
+    box?.addEventListener('wheel', roll, { passive: false });
+    return () => {
+      ro.disconnect();
+      box?.removeEventListener('wheel', roll);
+    };
   });
 
   // pages settle on a whole page after the wheel or the keys moved them
@@ -150,30 +155,49 @@
     box.scrollTo({ left: Math.round(box.scrollLeft / W) * W, behavior: still() ? 'auto' : 'smooth' });
   }
 
-  // a finger turns one page per swipe: the text follows it, and on release goes to the page `turn` picks.
-  // the browser's own pan is off (touch-action), its fling would fly over several pages
+  // a finger, or the mouse, turns one page per swipe: the text follows it, and on release goes to the page
+  // `turn` picks. the browser's own pan is off (touch-action), its fling would fly over several pages.
+  // the mouse also selects: a drag down, a drag after a double click, or one begun on a selection, selects
   let g: { id: number; x: number; y: number; t: number; left: number; on: boolean } | null = null;
   let glide = 0;
+  let aim = 0;
   let swiped = false;
+  let clicks = 0;
+  const last = (b: HTMLElement) => Math.round(b.scrollWidth / b.clientWidth) - 1;
+  function onSel(e: PointerEvent) {
+    const s = getSelection();
+    if (!s || s.isCollapsed || !s.rangeCount) return false;
+    return [...s.getRangeAt(0).getClientRects()].some(
+      (r) => e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom,
+    );
+  }
   function grab(e: PointerEvent) {
     swiped = false;
-    if (!pages || !box || e.pointerType === 'mouse' || !e.isPrimary) return;
+    if (!pages || !box || !e.isPrimary) return;
+    if (e.pointerType === 'mouse' && (e.button !== 0 || e.shiftKey || onSel(e) || (e.target as Element).closest('a, button, img')))
+      return;
     cancelAnimationFrame(glide);
     glide = 0;
     g = { id: e.pointerId, x: e.clientX, y: e.clientY, t: e.timeStamp, left: box.scrollLeft, on: false };
   }
   function drag(e: PointerEvent) {
     if (!g || !box || e.pointerId !== g.id) return;
+    const mouse = e.pointerType === 'mouse';
+    // a button let go outside, before the drag began, never came back as a pointerup
+    if (mouse && !(e.buttons & 1)) return void (g = null);
     const dx = e.clientX - g.x,
       dy = e.clientY - g.y;
     if (!g.on) {
       if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
       // across is a page turn; down, or a selection being drawn, is not
-      if (Math.abs(dy) >= Math.abs(dx) || !getSelection()?.isCollapsed) return void (g = null);
+      if (Math.abs(dy) >= Math.abs(dx) || (mouse ? clicks > 1 : !getSelection()?.isCollapsed)) return void (g = null);
       g.on = true;
       moved = true;
       box.setPointerCapture(e.pointerId);
+      if (mouse) box.style.userSelect = 'none';
     }
+    // the few letters the mouse took on its way to the threshold are not a selection
+    if (mouse && !getSelection()?.isCollapsed) getSelection()?.removeAllRanges();
     box.scrollLeft = g.left - dx;
   }
   function drop(e: PointerEvent) {
@@ -181,27 +205,67 @@
     const s = g;
     g = null;
     if (!s.on) return;
+    box.style.userSelect = '';
     swiped = true;
     const W = box.clientWidth;
     const from = Math.round(s.left / W);
-    const to = e.type === 'pointercancel' ? from : turn(from, Math.round(box.scrollWidth / W) - 1, e.clientX - s.x, e.timeStamp - s.t, W);
+    const to = e.type === 'pointercancel' ? from : turn(from, last(box), e.clientX - s.x, e.timeStamp - s.t, W);
     go(to * W);
+  }
+
+  // `n` pages on from the one shown, or from the one a turn is already going to
+  function flip(n: number) {
+    const b = box;
+    if (!b || g?.on) return;
+    const W = b.clientWidth;
+    moved = true;
+    go(hold(Math.round((glide ? aim : b.scrollLeft) / W) + n, last(b)) * W);
+  }
+
+  // the wheel and the trackpad: one push, one page
+  const push = wheel();
+  function roll(e: WheelEvent) {
+    moved = true;
+    if (!pages || !box || e.ctrlKey) return;
+    e.preventDefault();
+    const k = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? box.clientWidth : 1;
+    const n = push((Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY) * k, e.timeStamp);
+    if (n) flip(n);
+  }
+
+  // the keys turn a page at once, held they go on at REPEAT. in the text, or with nothing else in focus;
+  // the space only in the text, elsewhere it is the player's
+  let pressed = -Infinity;
+  function key(e: KeyboardEvent) {
+    if (!pages || !box || e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
+    const t = e.target as Node,
+      inside = box.contains(t);
+    if (!inside && t !== document.body && t !== document.documentElement) return;
+    const n = step(e.key, e.shiftKey);
+    if (!n || (e.key === ' ' && !inside)) return;
+    e.preventDefault();
+    if (e.repeat && e.timeStamp - pressed < REPEAT) return;
+    pressed = e.timeStamp;
+    flip(n);
   }
   // a short ease out to `left`, quicker than the browser's own smooth scroll
   function go(left: number) {
     const b = box;
     if (!b) return;
+    cancelAnimationFrame(glide);
+    glide = 0;
+    aim = left;
     const x0 = b.scrollLeft,
       d = left - x0;
     if (still() || !d) return void (b.scrollLeft = left);
     const t0 = performance.now(),
       ms = 220;
-    const step = (now: number) => {
+    const frame = (now: number) => {
       const k = Math.min((now - t0) / ms, 1);
       b.scrollLeft = x0 + d * (1 - (1 - k) ** 3);
-      glide = k < 1 ? requestAnimationFrame(step) : 0;
+      glide = k < 1 ? requestAnimationFrame(frame) : 0;
     };
-    glide = requestAnimationFrame(step);
+    glide = requestAnimationFrame(frame);
   }
 
   function off() {
@@ -259,6 +323,8 @@
   }
 </script>
 
+<svelte:window onkeydown={key} />
+
 <div
   class={wide ? 'prd' : 'pane rd'}
   class:pages
@@ -272,12 +338,12 @@
     down = { x: e.clientX, y: e.clientY };
     grab(e);
   }}
+  onmousedown={(e) => (clicks = e.detail)}
   onpointermove={drag}
   onpointerup={drop}
   onpointercancel={drop}
   onclick={tap}
   onkeydown={(e) => e.key.startsWith('Arrow') && off()}
-  onwheel={() => (moved = true)}
   ontouchstart={() => (moved = true)}
   onscrollend={settle}
 >
