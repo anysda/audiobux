@@ -5,6 +5,8 @@
 плеер с главами и скоростью, рядом текст, где подсвечено то, что звучит. Сканы
 распознаются, рисунки и таблицы пересказываются словами.
 
+![Книга на ПК: главы, текст с подсветкой того, что звучит, и плеер](docs/screenshots/book-pc.png)
+
 ## Требования
 
 - Debian 12 или 13.
@@ -20,15 +22,16 @@ Docker и NVIDIA Container Toolkit установщик ставит сам. В�
 ## Установка
 
 ```sh
-git clone https://gitlab.anysda.space/anysda/audiobux.git && cd audiobux
+git clone https://github.com/anysda/audiobux.git && cd audiobux
 ./install.sh
 ```
 
 `install.sh` запускается от обычного пользователя (права root попросит через
 `sudo`) или от root. Он ставит Docker и NVIDIA Container Toolkit, если их нет,
-создаёт `.env` из `.env.example`, собирает образы и запускает сервис. Образы
-лёгкие: web около 90 МБ, worker около 470 МБ, torch и CUDA в них нет. В конце
-установщик печатает адрес интерфейса, например `http://192.168.1.10:8080`.
+создаёт `.env` из `.env.example`, скачивает готовые образы из
+`ghcr.io/anysda/audiobux` и запускает сервис. Образы лёгкие: web около 90 МБ,
+worker около 470 МБ, torch и CUDA в них нет. В конце установщик печатает адрес
+интерфейса, например `http://192.168.1.10:8080`.
 Повторный запуск безопасен.
 
 ### Если установка не удалась
@@ -121,5 +124,6 @@ Docker и NVIDIA Container Toolkit остаются в системе.
 
 - [docs/architecture.md](docs/architecture.md) - устройство сервиса, раскладка
   данных и [все переменные](docs/architecture.md#настройки) `AUDIOBUX_*`.
-- [docs/development.md](docs/development.md) - разработка, проверки и тесты.
+- [docs/development.md](docs/development.md) - разработка, проверки, тесты и
+  сборка образов.
 - [docs/openapi.json](docs/openapi.json) - описание API.

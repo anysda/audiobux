@@ -1,0 +1,98 @@
+name: images
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write
+
+# Прогоны по очереди: прогон старого коммита, закончив позже, перетёр бы
+# latest образом старого коммита.
+concurrency:
+  group: images
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: worker
+            context: .
+            target: worker
+          - name: web
+            context: .
+            target: web
+          # Поиск обложек в сети, отдельный контейнер без данных.
+          - name: cover
+            context: coverfinder
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # latest - последний main, его ставит install.sh; sha-<коммит> - каждый коммит.
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}/${{ matrix.name }}
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix=sha-
+
+      - name: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          target: ${{ matrix.target }}
+          platforms: linux/amd64
+          load: true
+          tags: smoke/${{ matrix.name }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+
+      # Образ, который не стартует, в реестр не уезжает: install.sh стянет его.
+      - name: smoke worker
+        if: matrix.name == 'worker'
+        run: docker run --rm smoke/worker python -c "import audiobux.worker, audiobux.pipeline"
+
+      - name: smoke web
+        if: matrix.name == 'web'
+        run: |
+          docker run --rm smoke/web python -c "import audiobux.web"
+          docker run --rm smoke/web test -f /app/static/index.html
+
+      - name: smoke cover
+        if: matrix.name == 'cover'
+        run: >
+          docker run --rm smoke/cover python -I -c
+          "import ast; ast.parse(open('/app/finder.py').read())"
+
+      - name: push
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          target: ${{ matrix.target }}
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+      # Digest в аннотации: по ней сверяют то, что стянула машина, с тем, что собрали.
+      - name: digest
+        run: echo "::notice title=${{ matrix.name }}:${{ steps.meta.outputs.version }}::${{ steps.push.outputs.digest }}"

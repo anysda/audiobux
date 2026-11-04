@@ -99,10 +99,29 @@ sed -i '/^from f5_tts.model.trainer import Trainer$/d' \
 Итого на машине под образы, рантайм и модели нужно около 36 ГБ свободного места, плюс около 31 МБ
 на каждый час готовых книг.
 
+## Образы
+
+Образы собирает GitHub Actions (`.github/workflows/images.yml`) на каждый пуш в `main`
+и кладёт в `ghcr.io/anysda/audiobux/worker`, `.../web` и `.../cover`. Теги: `latest` - последний
+`main`, его ставит `install.sh`; `sha-<коммит>` - каждый коммит.
+Образ, который не импортирует свой процесс, в реестр не уходит.
+
+Собрать образ у себя и запустить его вместо скачанного:
+
+```sh
+docker build --target web -t ghcr.io/anysda/audiobux/web:latest .
+docker build --target worker -t ghcr.io/anysda/audiobux/worker:latest .
+docker build -t ghcr.io/anysda/audiobux/cover:latest coverfinder
+docker compose up -d
+```
+
+`./install.sh` после этого снова скачает образы из реестра.
+
 ## Стиль и проверки
 
-Все настройки в `pyproject.toml`. Перед коммитом их гоняет pre-commit, в GitLab
-те же проверки идут стадиями `lint`, `types`, `deadcode`, `imports`, `test`.
+Все настройки в `pyproject.toml`. Перед коммитом их гоняет pre-commit, в GitHub Actions
+те же проверки идут заданиями `ruff`, `mypy`, `vulture`, `imports` и `pytest`
+(`.github/workflows/checks.yml`) на каждый пуш в `main` и pull request.
 Вручную из корня репозитория:
 
 ```sh
@@ -164,7 +183,7 @@ npm --prefix frontend run lint      # eslint
 npm --prefix frontend run build     # frontend/dist
 ```
 
-В GitLab эти три проверки и `npm ci` идут заданием `frontend` в стадии `lint`.
+В GitHub Actions эти проверки, `npm test` (vitest) и `npm ci` идут заданием `frontend`.
 
 Правила:
 

@@ -1,5 +1,7 @@
-# Two images, one per process. The worker voices the queue on the video card and holds
-# everything under the data folder; the web process only takes uploads into
+# The images are built by GitHub Actions from main (.github/workflows/images.yml)
+# and published to ghcr.io/anysda/audiobux; install.sh pulls them.
+# Two of them, one per process. The worker voices the queue on the video card and
+# holds everything under the data folder; the web process only takes uploads into
 # incoming/, reads the library, keeps where the listener is in web/ and asks the
 # worker on its socket in run/.
 # The data folder on the host is AUDIOBUX_DATA (./data by default); both
@@ -19,8 +21,7 @@ x-hardened: &hardened
 services:
   worker:
     <<: *hardened
-    build: {context: ., target: worker}
-    image: audiobux-worker:latest
+    image: ghcr.io/anysda/audiobux/worker:latest
     container_name: audiobux-worker
     command: ["audiobux", "worker"]
     environment:
@@ -48,8 +49,7 @@ services:
 
   web:
     <<: *hardened
-    build: {context: ., target: web}
-    image: audiobux-web:latest
+    image: ghcr.io/anysda/audiobux/web:latest
     container_name: audiobux-web
     command: ["audiobux", "web", "--port", "8080"]
     environment:
@@ -79,8 +79,7 @@ services:
   # hosts on its list, and its bridge has a fixed name, br-cover-out, so that a firewall
   # on the host can drop it to private ranges and to the host as well.
   cover:
-    build: coverfinder
-    image: audiobux-cover:latest
+    image: ghcr.io/anysda/audiobux/cover:latest
     container_name: audiobux-cover
     restart: unless-stopped
     networks: [cover_in, cover_out]
