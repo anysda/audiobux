@@ -5,6 +5,8 @@
 плеер с главами и скоростью, рядом текст, где подсвечено то, что звучит. Сканы
 распознаются, рисунки и таблицы пересказываются словами.
 
+Инструмент для личных копий купленных книг, готовые m4b не распространяйте.
+
 ![Книга на ПК: главы, текст с подсветкой того, что звучит, и плеер](docs/screenshots/book-pc.png)
 
 ## Требования
@@ -22,7 +24,7 @@ Docker и NVIDIA Container Toolkit установщик ставит сам. В�
 ## Установка
 
 ```sh
-git clone https://github.com/anysda/audiobux.git && cd audiobux
+git clone https://github.com/anysda/audiobux && cd audiobux
 ./install.sh
 ```
 
@@ -127,3 +129,12 @@ Docker и NVIDIA Container Toolkit остаются в системе.
 - [docs/development.md](docs/development.md) - разработка, проверки, тесты и
   сборка образов.
 - [docs/openapi.json](docs/openapi.json) - описание API.
+
+## Модели и лицензии
+
+Код audiobux - под [MIT](LICENSE). Озвучивает модель
+[F5-TTS_RUSSIAN](https://huggingface.co/Misha24-10/F5-TTS_RUSSIAN) автора
+[Misha24-10](https://huggingface.co/Misha24-10) под лицензией
+[CC-BY-NC-4.0](https://creativecommons.org/licenses/by-nc/4.0/): только
+некоммерческое использование. Образец голоса взят из LibriVox (общественное
+достояние), источник - в [voice/SOURCE.txt](voice/SOURCE.txt).
