@@ -1,6 +1,6 @@
 [project]
 name = "audiobux"
-version = "0.5.0"
+version = "0.5.1"
 description = "Book file in, m4b audiobook out"
 requires-python = ">=3.12"
 # the settings, the socket contract and the list of formats need the standard library only

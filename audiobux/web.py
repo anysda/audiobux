@@ -122,7 +122,7 @@ def create(settings: Settings) -> FastAPI:
         )
     app = FastAPI(
         title="audiobux",
-        version="0.5.0",
+        version="0.5.1",
         description="A book file in, an audiobook with chapters and its text out. A request for another host, "
         "or a POST, PUT or DELETE without the service's own Origin, is refused with 403; one of the API "
         f"before the sign-in (`/api/auth/login`), with 401. After {auth.ATTEMPTS} sign-ins in a row from an "

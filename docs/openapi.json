@@ -3,7 +3,7 @@
   "info": {
     "title": "audiobux",
     "description": "A book file in, an audiobook with chapters and its text out. A request for another host, or a POST, PUT or DELETE without the service's own Origin, is refused with 403; one of the API before the sign-in (`/api/auth/login`), with 401. After 5 sign-ins in a row from an address without a right one, the sign-in answers it 429 for 15 minutes.",
-    "version": "0.5.0"
+    "version": "0.5.1"
   },
   "paths": {
     "/api/auth/login": {
