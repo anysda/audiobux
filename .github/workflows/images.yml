@@ -3,6 +3,8 @@ name: images
 on:
   push:
     branches: [main]
+    # выпуск: образы под тегом выпуска и их digest в images.txt при выпуске на GitHub
+    tags: ['v*']
 
 permissions:
   contents: read
@@ -44,13 +46,15 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # latest - последний main, его ставит install.sh; sha-<коммит> - каждый коммит.
+      # v<версия> - выпуск, его ставит install.sh; latest - последний main;
+      # sha-<коммит> - каждый коммит.
       - id: meta
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}/${{ matrix.name }}
           tags: |
-            type=raw,value=latest
+            type=ref,event=tag
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
             type=sha,prefix=sha-
 
       - name: build
@@ -96,3 +100,41 @@ jobs:
       # Digest в аннотации: по ней сверяют то, что стянула машина, с тем, что собрали.
       - name: digest
         run: echo "::notice title=${{ matrix.name }}:${{ steps.meta.outputs.version }}::${{ steps.push.outputs.digest }}"
+
+      - name: save digest
+        env:
+          IMAGE_DIGEST: ${{ steps.push.outputs.digest }}
+          IMAGE_NAME: ${{ matrix.name }}
+        run: printf '%s %s\n' "$IMAGE_NAME" "$IMAGE_DIGEST" > "$IMAGE_NAME.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.name }}
+          path: ${{ matrix.name }}.txt
+
+  # images.txt при выпуске: install.sh тянет образы по тегу выпуска и берёт только
+  # с этими digest, так подмена под тем же тегом в реестре не запускается.
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: digest-*
+          path: digests
+          merge-multiple: true
+      - name: images.txt
+        run: |
+          cat digests/worker.txt digests/web.txt digests/cover.txt > images.txt
+          [ "$(grep -cE '^(worker|web|cover) sha256:[0-9a-f]{64}$' images.txt)" = 3 ]
+          cat images.txt
+      - name: upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --verify-tag --title "$TAG" --notes ""
+          gh release upload "$TAG" images.txt --clobber

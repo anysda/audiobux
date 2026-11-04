@@ -6,5 +6,6 @@ __pycache__/
 .coverage
 /data/
 .env
+/compose.override.yaml
 node_modules/
 /frontend/dist/

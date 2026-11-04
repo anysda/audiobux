@@ -102,21 +102,31 @@ sed -i '/^from f5_tts.model.trainer import Trainer$/d' \
 
 ## Образы
 
-Образы собирает GitHub Actions (`.github/workflows/images.yml`) на каждый пуш в `main`
-и кладёт в `ghcr.io/anysda/audiobux/worker`, `.../web` и `.../cover`. Теги: `latest` - последний
-`main`, его ставит `install.sh`; `sha-<коммит>` - каждый коммит.
+Образы собирает GitHub Actions (`.github/workflows/images.yml`) на каждый пуш в `main` и
+тега `v*` и кладёт в `ghcr.io/anysda/audiobux/worker`, `.../web` и `.../cover`. Теги: `v<версия>` -
+выпуск, его ставит `install.sh`; `latest` - последний `main`; `sha-<коммит>` - каждый коммит.
 Образ, который не импортирует свой процесс, в реестр не уходит.
 
-Собрать образ у себя и запустить его вместо скачанного:
+На тег выпуска CI кладёт в выпуск на GitHub `images.txt`: строка `<образ> sha256:<digest>` на
+каждый образ. `install.sh` ставит последний выпуск (куда ведёт `github.com/anysda/audiobux/releases/latest`,
+каталог `.git` ему не нужен): тянет образы по тегу выпуска, сверяет их `RepoDigests` с `images.txt` и пишет digest в `.env`
+(`AUDIOBUX_*_DIGEST`); `compose.yaml` запускает образы только по ним. Другой образ под тем же
+тегом, из реестра или поставленный руками, установку останавливает.
+
+Собрать образы у себя и запустить их вместо образов выпуска (`compose.yaml` и тогда читает digest
+из `.env`, так что сначала `./install.sh`):
 
 ```sh
-docker build --target web -t ghcr.io/anysda/audiobux/web:latest .
-docker build --target worker -t ghcr.io/anysda/audiobux/worker:latest .
-docker build -t ghcr.io/anysda/audiobux/cover:latest coverfinder
+docker build --target web -t audiobux/web:local .
+docker build --target worker -t audiobux/worker:local .
+docker build -t audiobux/cover:local coverfinder
+printf 'services:\n' >compose.override.yaml
+for s in worker web cover; do printf '  %s:\n    image: audiobux/%s:local\n' $s $s >>compose.override.yaml; done
 docker compose up -d
 ```
 
-`./install.sh` после этого снова скачает образы из реестра.
+`compose.override.yaml` compose читает сам, в git он не попадает. Вернуться к образам выпуска:
+удалить его и запустить `./install.sh`.
 
 ## Стиль и проверки
 

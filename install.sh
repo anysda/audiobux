@@ -21,6 +21,14 @@ fail() {
 
 # --- checks: nothing is installed before they pass
 
+# a new password is as long as the web process takes, counted in letters, not bytes
+check_password() {
+	local LC_ALL=C.UTF-8
+	[ -z "${AUDIOBUX_PASSWORD:-}" ] || [ "${#AUDIOBUX_PASSWORD}" -ge 12 ] ||
+		fail "пароль в AUDIOBUX_PASSWORD короче 12 символов." "Задайте пароль длиннее и запустите ./install.sh снова. Ничего не установлено."
+}
+check_password
+
 [ -r /etc/os-release ] || fail "нет /etc/os-release, систему не узнать." "Нужен Debian 12 или 13."
 # shellcheck source=/dev/null
 . /etc/os-release
@@ -181,6 +189,42 @@ say "Данные: $data, владелец $uid:$gid"
 port=$(setting AUDIOBUX_PORT)
 port=${port:-8080}
 
+# --- the images of the release, checked by digest
+
+# an image pulled by its tag is taken only with the digest CI built it with; another
+# image under the same tag, pulled or put there by hand, stops the install
+verify_image() {
+	local ref=$1:$2 pinned=$1@$3 digests
+	docker pull -q "$ref" >/dev/null || say "Образ $ref не скачался, проверяю тот, что уже есть"
+	digests=$(docker image inspect -f '{{join .RepoDigests " "}}' "$ref" 2>/dev/null) ||
+		fail "образ $ref не скачался." "Проверьте доступ к ghcr.io и запустите ./install.sh снова."
+	[[ " $digests " = *" $pinned "* ]] ||
+		fail "образ $ref не тот, что собран для выпуска: digest не совпал." \
+			"Ожидался $pinned." "Ничего не запущено."
+}
+
+# the latest release on GitHub: its page is where /releases/latest leads
+latest_release() {
+	local url
+	url=$(curl -fsSIL -o /dev/null -w '%{url_effective}' https://github.com/anysda/audiobux/releases/latest) ||
+		fail "не узнать последний выпуск на GitHub." "Проверьте доступ к github.com и запустите ./install.sh снова."
+	[[ $url = */releases/tag/v* ]] || fail "на GitHub ещё нет выпуска audiobux."
+	printf '%s\n' "${url##*/}"
+}
+
+# CI puts the digests of the images of a release into its images.txt on GitHub
+release=$(latest_release)
+images=$(curl -fsSL "https://github.com/anysda/audiobux/releases/download/$release/images.txt") ||
+	fail "не скачался список образов выпуска $release." \
+		"Проверьте доступ к github.com; сразу после выхода выпуска образы ещё собираются."
+say "Скачиваю и сверяю образы выпуска $release"
+for name in worker web cover; do
+	digest=$(sed -n "s/^$name \(sha256:[0-9a-f]\{64\}\)$/\1/p" <<<"$images")
+	[ -n "$digest" ] || fail "в списке образов выпуска $release нет $name."
+	verify_image "ghcr.io/anysda/audiobux/$name" "$release" "$digest"
+	[ "$(setting "AUDIOBUX_${name^^}_DIGEST")" = "$digest" ] || set_setting "AUDIOBUX_${name^^}_DIGEST" "$digest"
+done
+
 # the addresses of the machine in the LAN, without the bridges of Docker
 if command -v ip >/dev/null; then
 	addresses=$(ip -o -4 addr show scope global | awk '$2 !~ /^(docker|br-|veth)/ { split($4, a, "/"); print a[1] }')
@@ -208,9 +252,7 @@ fi
 
 # --- start and wait
 
-say "Скачиваю образы и запускаю. Рантайм моделей (около 4 ГБ) и сами модели (около 28 ГБ) воркер скачает после запуска, ход виден в интерфейсе"
-docker compose pull ||
-	fail "образы не скачались." "Проверьте доступ к ghcr.io и запустите ./install.sh снова."
+say "Запускаю. Рантайм моделей (около 4 ГБ) и сами модели (около 28 ГБ) воркер скачает после запуска, ход виден в интерфейсе"
 docker compose up -d ||
 	fail "контейнеры не запустились." "Журналы: docker compose logs worker web"
 
