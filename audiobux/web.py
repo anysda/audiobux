@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import stat
 import uuid
 from collections.abc import AsyncIterator
@@ -43,6 +44,10 @@ FileName = Annotated[str, Query(max_length=1024, description="the file's name: t
 
 # the worker's errors as HTTP answers; the detail is the error code itself
 STATUS = {"not-found": 404, "conflict": 409, "not-a-book": 415, "too-large": 413, "unavailable": 503}
+# the web process's own error codes, besides the worker's
+CODES = ["bad-request", "forbidden", "unauthorized", "too-many-attempts", "queue-full", "no-space"]
+# the books of the queue, the one being voiced among them
+QUEUED = ("queued", "running", "paused")
 FIGURE = re.compile(r"[0-9a-z_-]{1,64}\.jpg")
 # what the API answers before the sign-in
 OPEN = {"/api/auth", "/api/auth/login"}
@@ -59,10 +64,7 @@ HOST = re.compile(r"(?:\[(?P<v6>[0-9a-f:.]+)\]|(?P<name>[^:\[\]/@]+))(?::\d{1,5}
 
 
 class Problem(BaseModel):
-    detail: str = Field(
-        description="error code: "
-        + ", ".join(sorted([*STATUS, "bad-request", "forbidden", "unauthorized", "too-many-attempts"]))
-    )
+    detail: str = Field(description="error code: " + ", ".join(sorted([*STATUS, *CODES])))
 
 
 class Login(BaseModel):
@@ -139,6 +141,7 @@ def create(settings: Settings) -> FastAPI:
     library = settings.library
     places = Listening(settings.web / "listening.db")
     limit = settings.upload_mb << 20
+    min_free = settings.min_free_gb << 30
 
     def ask(method: str, **params: str) -> Any:
         try:
@@ -155,15 +158,22 @@ def create(settings: Settings) -> FastAPI:
         summary="Upload a book file",
         responses={
             200: {"description": "the same file was there already: that book, `known` true"},
-            **_problems(400, 413, 415, 503),
+            **_problems(400, 413, 415, 429, 503, 507),
         },
         openapi_extra=UPLOAD,
     )
     async def upload(request: Request, response: Response, name: FileName = "") -> contract.Submitted:
         """The file goes to `incoming/` under a fresh id and only there; it is gone again
-        when it is too large, not a book, cut off, or the worker does not take it."""
+        when it is too large, not a book, cut off, or the worker does not take it. None is
+        taken while `AUDIOBUX_QUEUE_MAX` books are in the queue (429) or the data folder
+        has less than `AUDIOBUX_MIN_FREE_GB` free (507)."""
         if int(request.headers.get("content-length", "0")) > limit:
             raise HTTPException(413, "too-large")
+        if (await run_in_threadpool(shutil.disk_usage, settings.incoming)).free < min_free:
+            raise HTTPException(507, "no-space")
+        queued = [b for b in await run_in_threadpool(ask, "library.list") if b["state"] in QUEUED]
+        if len(queued) >= settings.queue_max:
+            raise HTTPException(429, "queue-full")
         upload_id = uuid.uuid4().hex
         path = settings.incoming / upload_id
         try:

@@ -80,7 +80,10 @@ F5, faster-whisper, RUAccent, llama-server) в `runtime/`, качает моде
 
 - Загрузка: `POST /api/books?name=<имя файла>`, тело - сам файл. Ответ 201 для
   новой книги, 200 для уже известной, 413 для файла больше
-  `AUDIOBUX_UPLOAD_MB`, 415 для неизвестного формата.
+  `AUDIOBUX_UPLOAD_MB`, 415 для неизвестного формата. Файл не принимается
+  вовсе, пока в очереди (ждут или озвучиваются) `AUDIOBUX_QUEUE_MAX` книг -
+  429 `{"detail":"queue-full"}`, и пока в каталоге данных свободно меньше
+  `AUDIOBUX_MIN_FREE_GB` ГБ - 507 `{"detail":"no-space"}`.
 - Аудио отдаётся с `Range` (один диапазон), чтобы плеер мог перематывать.
 - События для интерфейса: `GET /api/events` (Server-Sent Events).
 
@@ -310,7 +313,7 @@ AUDIOBUX_DATA/
 
 Все переменные `AUDIOBUX_*` и их значения в коде (`audiobux/config.py`).
 `compose.yaml` передаёт контейнерам только `DATA`, `TTS`, `QUIET_HOURS`,
-`COVER_URL`, `HOSTS`, `LOGIN` и `UPLOAD_MB`; `DATA`, `VOICE`, `RUNTIME` и `FRONTEND` задаёт ещё и `Dockerfile`, остальные действуют со значением из кода.
+`COVER_URL`, `HOSTS`, `LOGIN`, `UPLOAD_MB`, `QUEUE_MAX` и `MIN_FREE_GB`; `DATA`, `VOICE`, `RUNTIME` и `FRONTEND` задаёт ещё и `Dockerfile`, остальные действуют со значением из кода.
 
 | Переменная | По умолчанию в коде | Что задаёт |
 |---|---|---|
@@ -332,6 +335,8 @@ AUDIOBUX_DATA/
 | `AUDIOBUX_VERIFY_CER` | `0.15` | порог ошибок куска |
 | `AUDIOBUX_VERIFY_ATTEMPTS` | `3` | попыток на кусок |
 | `AUDIOBUX_UPLOAD_MB` | `1024` | предел загрузки, МиБ |
+| `AUDIOBUX_QUEUE_MAX` | `20` | сколько книг может быть в очереди, готовые и упавшие не в счёт |
+| `AUDIOBUX_MIN_FREE_GB` | `5` | меньше свободного места в каталоге данных, ГБ, - загрузка не принимается |
 | `AUDIOBUX_HOSTS` | пусто | имена хостов для web |
 | `AUDIOBUX_LOGIN` | `on` | вход в web; `off` - без входа |
 | `AUDIOBUX_FRONTEND` | `frontend/dist` (в образе `/app/static`) | собранный интерфейс |

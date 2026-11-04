@@ -147,6 +147,25 @@ def test_too_large_is_413_and_dropped(worker, pdf):
     assert client.post("/api/books", content=big[: 1 << 20]).status_code == 201, "the limit itself is taken"
 
 
+def test_a_full_queue_takes_no_upload_until_a_book_of_it_is_done(worker, pdf, chekhov_epub, chekhov_pdf):
+    client = client_for(dataclasses.replace(worker.settings, queue_max=2))
+    first, _ = submit(worker, chekhov_epub), submit(worker, chekhov_pdf)
+    refused = client.post("/api/books", params={"name": "a.pdf"}, content=pdf + b"\0")
+    assert (refused.status_code, refused.json()) == (429, {"detail": "queue-full"})
+    assert incoming(worker) == [] and len(worker.library.books()) == 2
+    worker.library.update(first, state="done")
+    assert client.post("/api/books", params={"name": "a.pdf"}, content=pdf + b"\0").status_code == 201
+
+
+def test_too_little_free_space_takes_no_upload(worker, pdf):
+    full = client_for(dataclasses.replace(worker.settings, min_free_gb=1 << 30))
+    refused = full.post("/api/books", params={"name": "a.pdf"}, content=pdf)
+    assert (refused.status_code, refused.json()) == (507, {"detail": "no-space"})
+    assert incoming(worker) == [] and worker.library.books() == []
+    roomy = client_for(dataclasses.replace(worker.settings, min_free_gb=0))
+    assert roomy.post("/api/books", params={"name": "a.pdf"}, content=pdf).status_code == 201
+
+
 def test_an_upload_cut_off_halfway_leaves_nothing(worker, pdf):
     app = web.create(dataclasses.replace(worker.settings, login=False))
     seen = set()

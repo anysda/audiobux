@@ -110,7 +110,7 @@
     "/api/books": {
       "post": {
         "summary": "Upload a book file",
-        "description": "The file goes to `incoming/` under a fresh id and only there; it is gone again\nwhen it is too large, not a book, cut off, or the worker does not take it.",
+        "description": "The file goes to `incoming/` under a fresh id and only there; it is gone again\nwhen it is too large, not a book, cut off, or the worker does not take it. None is\ntaken while `AUDIOBUX_QUEUE_MAX` books are in the queue (429) or the data folder\nhas less than `AUDIOBUX_MIN_FREE_GB` free (507).",
         "operationId": "upload_api_books_post",
         "security": [
           {
@@ -176,6 +176,16 @@
             },
             "description": "Unsupported Media Type"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -185,6 +195,16 @@
               }
             },
             "description": "Service Unavailable"
+          },
+          "507": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Insufficient Storage"
           },
           "422": {
             "description": "Validation Error",
@@ -1749,7 +1769,7 @@
           "detail": {
             "type": "string",
             "title": "Detail",
-            "description": "error code: bad-request, conflict, forbidden, not-a-book, not-found, too-large, too-many-attempts, unauthorized, unavailable"
+            "description": "error code: bad-request, conflict, forbidden, no-space, not-a-book, not-found, queue-full, too-large, too-many-attempts, unauthorized, unavailable"
           }
         },
         "type": "object",

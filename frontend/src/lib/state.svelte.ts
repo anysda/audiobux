@@ -4,6 +4,13 @@ const SAVE_EVERY = 5000;
 // the events stream: asked again this long after it is refused; trusted no longer than its pings (15 s)
 const AGAIN = 5000;
 const QUIET = 20000;
+// what an upload refused is told by
+const REFUSED: Record<number, string> = {
+  413: 'Файл слишком большой',
+  415: 'Это не книга: нужен PDF, DjVu или EPUB',
+  429: 'Очередь полна: дождитесь, пока озвучатся книги в ней',
+  507: 'На сервере мало места, книга не принята',
+};
 
 class Library {
   books = $state<Book[]>([]);
@@ -191,9 +198,7 @@ class Library {
         this.say(r.known ? 'Эта книга уже есть' : 'Добавлено в очередь');
       } catch (e) {
         const s = e instanceof ApiError ? e.status : 0;
-        this.say(
-          s === 413 ? 'Файл слишком большой' : s === 415 ? 'Это не книга: нужен PDF, DjVu или EPUB' : 'Не удалось загрузить',
-        );
+        this.say(REFUSED[s] ?? 'Не удалось загрузить');
       }
     }
     void this.refresh();

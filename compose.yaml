@@ -85,6 +85,8 @@ services:
       # names the service is opened by besides its IP addresses, comma-separated
       AUDIOBUX_HOSTS: ${AUDIOBUX_HOSTS:-}
       AUDIOBUX_UPLOAD_MB: ${AUDIOBUX_UPLOAD_MB:-1024}
+      AUDIOBUX_QUEUE_MAX: ${AUDIOBUX_QUEUE_MAX:-20}
+      AUDIOBUX_MIN_FREE_GB: ${AUDIOBUX_MIN_FREE_GB:-5}
     # the worker makes the folders and the socket first
     depends_on:
       worker:

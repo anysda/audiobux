@@ -27,6 +27,10 @@ class Settings:
     verify_attempts: int = 3
     # the largest upload in MiB: a scanned book with pictures runs to a few hundred
     upload_mb: int = 1024
+    # an upload is refused while this many books wait or are being voiced
+    queue_max: int = 20
+    # an upload is refused while the data folder has less free than this, GB
+    min_free_gb: int = 5
     # host names the web process answers to besides IP addresses and localhost, comma-separated
     hosts: str = ""
     # sign-in to the web process; off behind a reverse proxy that does its own
@@ -91,6 +95,8 @@ class Settings:
             verify_cer=float(get("verify_cer", d.verify_cer)),
             verify_attempts=int(get("verify_attempts", d.verify_attempts)),
             upload_mb=int(get("upload_mb", d.upload_mb)),
+            queue_max=int(get("queue_max", d.queue_max)),
+            min_free_gb=int(get("min_free_gb", d.min_free_gb)),
             hosts=get("hosts", d.hosts),
             login=get("login", "on") != "off",
             frontend=Path(get("frontend", d.frontend)),
