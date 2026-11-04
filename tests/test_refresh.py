@@ -240,7 +240,8 @@ def test_a_book_without_chapters_and_without_its_m4b(tmp_path):
 
     found = refresh.run(folder, "Чехов - Рассказы.pdf", tmp_path / "work", context(tmp_path))
 
-    assert found == {"title": "Рассказы", "author": "Чехов", "chapters": [{"title": "Рассказы", "start": 0.0}]}
+    chapters = [{"title": "Рассказы", "start": 0.0}]
+    assert found == {"title": "Рассказы", "author": "Чехов", "chapters": chapters, "duration": float(len(paragraphs))}
     assert not (folder / "book.m4b").exists()
     synced = json.loads((folder / "sync.json").read_text())
     assert [c["title"] for c in synced["chapters"]] == ["Рассказы"]
@@ -287,6 +288,37 @@ def test_a_heading_in_two_lines_and_one_at_the_very_start():
     data, said = refresh.regroup(old, chapters, "Рассказы", "Чехов", [])
     assert [c["title"] for c in data["chapters"]] == [t1, title], "no chapter before the first one"
     assert [len(s) for s in said] == [len(p1) + 1, len(p2) + 2]
+
+
+@pytest.mark.parametrize("preface", [False, True])
+def test_a_title_page_and_contents_voiced_before_are_cut_out(tmp_path, preface):
+    """The title page, the imprint and the contents an older reading voiced are not the
+    book's text: cut out of the text and the sound. A first paragraph with no heading
+    of its own that the book has stays."""
+    (t1, p1), (t2, p2), _ = stories()
+    lead = ["Г. Альтов И ТУТ появился", "ИЗОБРЕТАТЕЛЬ", "МОСКВА «ДЕТСКАЯ ЛИТЕРАТУРА» 1987", "С О Д Е Р Ж А Н И Е"]
+    lead += [t1.upper(), "3", t2.upper(), "17"]
+    opening = [p2[0]] if preface else []
+    texts = [*lead, *opening, t1.upper(), *p1, t2.upper(), *p2]
+    old = old_sync(texts, "x")
+    chapters = [{"title": "", "paragraphs": opening}] if preface else []
+    chapters += [{"title": t, "paragraphs": [t.upper(), *p]} for t, p in ((t1, p1), (t2, p2))]
+    data, said = refresh.regroup(old, chapters, "Книга", "", [])
+    assert [c["title"] for c in data["chapters"]] == ["", t1, t2] if preface else [t1, t2]
+    assert data["chapters"][0]["paragraphs"][0] == (p2[0] if preface else t1.upper())
+
+    wav = tmp_path / "a.wav"
+    sf.write(wav, 0.2 * np.sin(2 * np.pi * 300 * np.arange(24000 * len(texts)) / 24000), 24000, subtype="PCM_16")
+    m4b.assemble([wav], [{"chapter": 0, "pause": 0.0}], ["x"], tmp_path / "old.m4b", {"title": "x"})
+    synced = refresh.retimed(reading.chapters(data, [], tmp_path, "Книга.pdf"), said, float(len(texts)))
+    sound = refresh.trimmed(synced, tmp_path / "old.m4b", tmp_path / "cut.m4b")
+    first = len(lead) - refresh.LEAD
+    assert sound == tmp_path / "cut.m4b"
+    assert float(probe(sound)["format"]["duration"]) == pytest.approx(len(texts) - first, abs=0.05)
+    assert synced["duration"] == pytest.approx(len(texts) - first, abs=0.05)
+    block = synced["chapters"][0]["blocks"][0]
+    assert block.get("t0", block.get("sentences", [{}])[0].get("t0")) == pytest.approx(refresh.LEAD, abs=0.05)
+    assert refresh.trimmed(synced, sound, tmp_path / "again.m4b") == sound, "cut once"
 
 
 def test_listings_figures_and_silent_blocks_keep_their_times(tmp_path):

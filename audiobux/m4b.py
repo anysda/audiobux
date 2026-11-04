@@ -89,6 +89,20 @@ def retag(src: Path, out: Path, meta: dict[str, str], chapters: list[dict[str, A
     subprocess.run(cmd, check=True)
 
 
+def cut(src: Path, out: Path, start: float) -> float:
+    """`src` from `start` seconds on into `out`, the sound and the cover copied as they
+    are; returns how much shorter it is."""
+    cmd = ["ffmpeg", "-y", "-v", "error", "-ss", f"{start:.3f}", "-i", str(src), "-i", str(src), "-map", "0:a"]
+    cmd += ["-map", "1:v?", "-c", "copy", "-movflags", "+faststart", "-f", "ipod", str(out)]
+    subprocess.run(cmd, check=True)
+    return _length(src) - _length(out)
+
+
+def _length(path: Path) -> float:
+    cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)]
+    return float(subprocess.run(cmd, check=True, capture_output=True, text=True).stdout)
+
+
 def _measure(source: list[str]) -> dict[str, str] | None:
     """First loudnorm pass; None when there is nothing to measure (pure silence)."""
     measure = [*source, "-af", f"loudnorm={LOUDNESS}:print_format=json", "-f", "null", "-"]

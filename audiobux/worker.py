@@ -173,6 +173,7 @@ class Worker:
             fields |= {"title": found["title"], "author": found["author"]}
             if "chapters" in found:
                 fields["chapters"] = json.dumps(found["chapters"], ensure_ascii=False)
+                fields["duration"] = found["duration"]
             log.info("%s: read again, %d chapters", book_id, len(found.get("chapters", [])))
         except Exception:
             log.exception("%s: reading again failed, the book stays as it was", book_id)
