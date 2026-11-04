@@ -6,12 +6,14 @@ Everything about books it asks the worker on the socket (`contract`); it only
 takes uploaded files into `incoming/`, gives out what is in `library/` and keeps
 where the listener is (`listening`) in its own folder.
 
-With no sign-in, any site open in the browser could reach the service, so `Guard`
-lets in only requests for this host and changes only from its own pages.
+Pages and the API need the sign-in (`auth`) unless `AUDIOBUX_LOGIN` is off; either
+way any site open in the browser could reach the service, so `Guard` lets in only
+requests for this host and changes only from its own pages.
 """
 
 import ipaddress
 import json
+import logging
 import os
 import re
 import stat
@@ -21,26 +23,29 @@ from pathlib import Path
 from typing import Annotated, Any, cast
 from urllib.parse import urlsplit
 
-from fastapi import FastAPI, HTTPException, Query, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi import Path as Param
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import Headers
 from starlette.requests import ClientDisconnect
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from . import contract, formats
+from . import auth, contract, formats
 from .config import Settings
 from .listening import Listening, Place
 
+log = logging.getLogger(__name__)
 BookId = Annotated[str, Param(pattern=f"^{contract.ID.pattern}$", description="the book's id, 32 hex digits")]
 FileName = Annotated[str, Query(max_length=1024, description="the file's name: the title, if the book has none")]
 
 # the worker's errors as HTTP answers; the detail is the error code itself
 STATUS = {"not-found": 404, "conflict": 409, "not-a-book": 415, "too-large": 413, "unavailable": 503}
 FIGURE = re.compile(r"[0-9a-z_-]{1,64}\.jpg")
+# what the API answers before the sign-in
+OPEN = {"/api/auth", "/api/auth/login"}
 
 # no inline scripts or styles, nothing from elsewhere, never inside a frame
 CSP = "default-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
@@ -54,7 +59,14 @@ HOST = re.compile(r"(?:\[(?P<v6>[0-9a-f:.]+)\]|(?P<name>[^:\[\]/@]+))(?::\d{1,5}
 
 
 class Problem(BaseModel):
-    detail: str = Field(description="error code: " + ", ".join(sorted([*STATUS, "bad-request", "forbidden"])))
+    detail: str = Field(
+        description="error code: "
+        + ", ".join(sorted([*STATUS, "bad-request", "forbidden", "unauthorized", "too-many-attempts"]))
+    )
+
+
+class Login(BaseModel):
+    required: bool = Field(description="whether the service asks for the sign-in")
 
 
 class Position(BaseModel):
@@ -90,15 +102,37 @@ UPLOAD = {
 
 
 def create(settings: Settings) -> FastAPI:
+    gate: list[Any] = []
+    if settings.login:
+        users, backend = auth.users(settings.web / "auth.db")
+        signed = users.current_user(optional=True)
+
+        def check(request: Request, user: Annotated[auth.User | None, Depends(signed)]) -> None:
+            request.state.signed_in = user is not None
+            if user is None and request.url.path.startswith("/api/") and request.url.path not in OPEN:
+                raise HTTPException(401, "unauthorized")
+
+        gate.append(Depends(check))
+    else:
+        log.warning(
+            "Вход выключен (AUDIOBUX_LOGIN=off): API и интерфейс открыты всем, кому виден порт. "
+            "Так можно только за обратным прокси со своим входом."
+        )
     app = FastAPI(
         title="audiobux",
         version="0.5.0",
         description="A book file in, an audiobook with chapters and its text out. A request for another host, "
-        "or a POST, PUT or DELETE without the service's own Origin, is refused with 403.",
+        "or a POST, PUT or DELETE without the service's own Origin, is refused with 403; one of the API "
+        f"before the sign-in (`/api/auth/login`), with 401. After {auth.ATTEMPTS} sign-ins in a row from an "
+        f"address without a right one, the sign-in answers it 429 for {auth.LOCKOUT // 60} minutes.",
         # the API pages load scripts from elsewhere, which the CSP does not let in
         docs_url=None,
         redoc_url=None,
+        dependencies=gate,
     )
+    if settings.login:
+        attempts = Depends(auth.Attempts())
+        app.include_router(users.get_auth_router(backend), prefix="/api/auth", tags=["auth"], dependencies=[attempts])
     app.add_exception_handler(RequestValidationError, _invalid)
     app.add_middleware(Guard, hosts=frozenset(h.strip().lower() for h in settings.hosts.split(",") if h.strip()))
     socket = settings.worker_socket
@@ -281,16 +315,25 @@ def create(settings: Settings) -> FastAPI:
         headers = {"cache-control": "no-cache", "x-accel-buffering": "no"}
         return StreamingResponse(_sse(stream), media_type="text/event-stream", headers=headers)
 
+    @app.get("/api/auth", summary="Whether the service asks for the sign-in")
+    def login() -> Login:
+        return Login(required=settings.login)
+
     @app.get("/{path:path}", include_in_schema=False)
-    def page(path: str) -> Response:
+    def page(request: Request, path: str) -> Response:
         """The interface: its files as they are, and its page for any other path, which
-        the interface routes itself."""
+        the interface routes itself; before the sign-in, the sign-in page for any."""
         if path == "api" or path.startswith("api/"):
             raise HTTPException(404, "not-found")
         root = settings.frontend.resolve()
         target = (root / path).resolve()
         if target.is_relative_to(root) and target.is_file() and target != root / "index.html":
             return FileResponse(target)
+        signed_in = not settings.login or request.state.signed_in
+        if not signed_in and path != "login":
+            return RedirectResponse("/login", 303)
+        if signed_in and path == "login":
+            return RedirectResponse("/", 303)
         if not (root / "index.html").is_file():
             raise HTTPException(404, "not-found")
         # the page names the scripts of this build: a phone keeping an old one keeps the old interface

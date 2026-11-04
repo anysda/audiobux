@@ -228,7 +228,10 @@
 <div class="ph" class:sel={picking} bind:this={phone}>
   <section class="lib" bind:this={libEl}>
     <header class="lh">
-      <div class="lead"><p class="mono">{books(lib.books.length)}</p></div>
+      <div class="lead">
+        {#if lib.login}<button class="mono out" onclick={() => lib.logout()}>Выйти</button>{/if}
+        <p class="mono">{books(lib.books.length)}</p>
+      </div>
     </header>
     <div class="pull mono" class:held class:go={pull >= PULL} style:height="{pull}px" aria-hidden="true">
       <span>{asking ? 'Обновление' : pull >= PULL ? 'Отпустите' : 'Обновить'}</span>

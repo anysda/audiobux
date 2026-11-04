@@ -6,7 +6,8 @@
 # worker on its socket in run/.
 # The data folder on the host is AUDIOBUX_DATA (./data by default); both
 # processes run as AUDIOBUX_UID:AUDIOBUX_GID, the owner of that folder. The web
-# answers on AUDIOBUX_PORT (8080). install.sh puts them all into .env.
+# answers on AUDIOBUX_PORT (8080), HTTPS only, with the certificate install.sh makes
+# in tls/. install.sh puts them all into .env.
 x-hardened: &hardened
   restart: unless-stopped
   user: "${AUDIOBUX_UID:-1000}:${AUDIOBUX_GID:-1000}"
@@ -51,9 +52,11 @@ services:
     <<: *hardened
     image: ghcr.io/anysda/audiobux/web:latest
     container_name: audiobux-web
-    command: ["audiobux", "web", "--port", "8080"]
+    command: ["audiobux", "web", "--port", "8080", "--tls", "/data/tls"]
     environment:
       AUDIOBUX_DATA: /data
+      # off: no sign-in, for a reverse proxy in front that signs in itself
+      AUDIOBUX_LOGIN: ${AUDIOBUX_LOGIN:-on}
       # names the service is opened by besides its IP addresses, comma-separated
       AUDIOBUX_HOSTS: ${AUDIOBUX_HOSTS:-}
       AUDIOBUX_UPLOAD_MB: ${AUDIOBUX_UPLOAD_MB:-1024}
@@ -72,6 +75,7 @@ services:
       - ${AUDIOBUX_DATA:-./data}/library:/data/library:ro
       - ${AUDIOBUX_DATA:-./data}/run:/data/run
       - ${AUDIOBUX_DATA:-./data}/web:/data/web
+      - ${AUDIOBUX_DATA:-./data}/tls:/data/tls:ro
       - /etc/localtime:/etc/localtime:ro
 
   # Cover search on the web, isolated: author and title in, image bytes out.

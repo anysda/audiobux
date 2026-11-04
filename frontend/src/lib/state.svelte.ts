@@ -14,6 +14,8 @@ class Library {
   syncs = $state<Record<string, Sync | null>>({});
   toast = $state({ text: '', n: 0 });
   sel = $state<string[]>([]);
+  // whether the service asks for the sign-in: then the screen offers to sign out
+  login = $state(false);
 
   // the player: one book at a time, one <audio> for both layouts
   cur = $state<string | null>(null);
@@ -93,6 +95,10 @@ class Library {
 
   start() {
     this.#wake();
+    api.auth().then(
+      (a) => (this.login = a.required),
+      () => {},
+    );
     addEventListener('pagehide', () => this.#save(true));
     // a phone puts the page away and gives it back as it was: what moved meanwhile is asked for again
     document.addEventListener('visibilitychange', () => {
@@ -191,6 +197,15 @@ class Library {
       }
     }
     void this.refresh();
+  }
+
+  async logout() {
+    try {
+      await api.logout();
+    } catch {
+      // a session already gone is signed out as well
+    }
+    location.assign('/login');
   }
 
   // selection

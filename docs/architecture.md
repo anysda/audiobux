@@ -6,7 +6,7 @@
 
 ```
  браузер
-    |  HTTP :AUDIOBUX_PORT
+    |  HTTPS :AUDIOBUX_PORT
     v
  +--------------------+   run/worker.sock    +--------------------------+
  | web                | -------------------> | worker                   |
@@ -29,8 +29,9 @@
 
 **web** (`audiobux web`). Отдаёт интерфейс и API. Книг не разбирает и моделей
 не видит: из каталога данных у него только `incoming/` (сюда пишет загрузки),
-`library/` только для чтения, `run/` (сокет) и `web/` (своя база
-`listening.db`: где слушатель остановился и прослушана ли книга). Контейнер
+`library/` только для чтения, `run/` (сокет), `web/` (свои базы:
+`listening.db` - где слушатель остановился и прослушана ли книга, `auth.db` -
+хэш пароля и сессии) и `tls/` только для чтения (сертификат). Контейнер
 только для чтения, 512 МБ памяти, не больше 64 процессов. Выход его сети в
 интернет закрыт (`enable_ip_masquerade: false`).
 
@@ -78,6 +79,18 @@
 
 Проверки на каждом запросе:
 
+- при `AUDIOBUX_LOGIN` не `off` нужен вход (fastapi-users, `audiobux/auth.py`):
+  пользователь один, `admin`, вход `POST /api/auth/login` формой
+  `username`/`password`, выход `POST /api/auth/logout`. Сессия - кука
+  `audiobux` (HttpOnly, Secure, SameSite=Lax) на 30 дней; в `auth.db`
+  от сессии только SHA-256 её токена, сам токен есть лишь в куке.
+  Без входа API отвечает 401 `{"detail":"unauthorized"}`, страницы
+  перенаправляют на `/login`; открыты только `GET /api/auth` (нужен ли вход),
+  сам вход и файлы интерфейса. После 5 попыток входа подряд без верной с
+  одного адреса вход отвечает этому адресу 429 `{"detail":"too-many-attempts"}`
+  15 минут; верный вход счёт сбрасывает, счёт в памяти процесса. Пароль
+  задаёт `audiobux password` (читает из stdin, с `--keep` не меняет заданный),
+  не короче 12 символов; новый пароль закрывает все сессии;
 - `Host` должен быть IP-адресом, `localhost` или именем из `AUDIOBUX_HOSTS`,
   иначе 403 `{"detail":"forbidden"}`;
 - у POST, PUT и DELETE должен быть заголовок `Origin` с тем же хостом;
@@ -246,6 +259,8 @@ AUDIOBUX_DATA/
   runtime/<хеш>/         рантайм моделей по pylock.runtime.toml: site/, llama/
   run/worker.sock        сокет worker
   web/listening.db       позиции и отметки «прослушано» (пишет только web)
+  web/auth.db            хэш пароля argon2 и SHA-256 токенов сессий, права 600
+  tls/cert.pem, key.pem  самоподписанный сертификат web, его выпускает install.sh
 ```
 
 ## sync.json
@@ -282,7 +297,7 @@ AUDIOBUX_DATA/
 
 Все переменные `AUDIOBUX_*` и их значения в коде (`audiobux/config.py`).
 `compose.yaml` передаёт контейнерам только `DATA`, `TTS`, `QUIET_HOURS`,
-`COVER_URL`, `HOSTS` и `UPLOAD_MB`; `DATA`, `VOICE`, `RUNTIME` и `FRONTEND` задаёт ещё и `Dockerfile`, остальные действуют со значением из кода.
+`COVER_URL`, `HOSTS`, `LOGIN` и `UPLOAD_MB`; `DATA`, `VOICE`, `RUNTIME` и `FRONTEND` задаёт ещё и `Dockerfile`, остальные действуют со значением из кода.
 
 | Переменная | По умолчанию в коде | Что задаёт |
 |---|---|---|
@@ -305,5 +320,6 @@ AUDIOBUX_DATA/
 | `AUDIOBUX_VERIFY_ATTEMPTS` | `3` | попыток на кусок |
 | `AUDIOBUX_UPLOAD_MB` | `1024` | предел загрузки, МиБ |
 | `AUDIOBUX_HOSTS` | пусто | имена хостов для web |
+| `AUDIOBUX_LOGIN` | `on` | вход в web; `off` - без входа |
 | `AUDIOBUX_FRONTEND` | `frontend/dist` (в образе `/app/static`) | собранный интерфейс |
 | `AUDIOBUX_COVER_URL` | пусто = обложка в сети не ищется (в compose `http://cover:8080`) | адрес сервиса cover |

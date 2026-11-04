@@ -143,17 +143,20 @@
           <button class="pbtn solid" onclick={() => lib.clear()}>Отмена</button>
         </div>
       {:else}
-        <label class="padd"
-          ><svg viewBox="0 0 24 24"><path d="M12 4v16M4 12h16" /></svg>Добавить книгу<input
-            type="file"
-            multiple
-            accept={lib.formats.join(',')}
-            onchange={(e) => {
-              void lib.upload(e.currentTarget.files);
-              e.currentTarget.value = '';
-            }}
-          /></label
-        >
+        <div class="pacts">
+          {#if lib.login}<button class="pbtn" onclick={() => lib.logout()}>Выйти</button>{/if}
+          <label class="padd"
+            ><svg viewBox="0 0 24 24"><path d="M12 4v16M4 12h16" /></svg>Добавить книгу<input
+              type="file"
+              multiple
+              accept={lib.formats.join(',')}
+              onchange={(e) => {
+                void lib.upload(e.currentTarget.files);
+                e.currentTarget.value = '';
+              }}
+            /></label
+          >
+        </div>
       {/if}
     </header>
   {/if}

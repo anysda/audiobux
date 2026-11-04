@@ -2,15 +2,121 @@
   "openapi": "3.1.0",
   "info": {
     "title": "audiobux",
-    "description": "A book file in, an audiobook with chapters and its text out. A request for another host, or a POST, PUT or DELETE without the service's own Origin, is refused with 403.",
+    "description": "A book file in, an audiobook with chapters and its text out. A request for another host, or a POST, PUT or DELETE without the service's own Origin, is refused with 403; one of the API before the sign-in (`/api/auth/login`), with 401. After 5 sign-ins in a row from an address without a right one, the sign-in answers it 429 for 15 minutes.",
     "version": "0.5.0"
   },
   "paths": {
+    "/api/auth/login": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Auth:Cookie.Login",
+        "operationId": "auth_cookie_login_api_auth_login_post",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_auth_cookie_login_api_auth_login_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                },
+                "examples": {
+                  "LOGIN_BAD_CREDENTIALS": {
+                    "summary": "Bad credentials or the user is inactive.",
+                    "value": {
+                      "detail": "LOGIN_BAD_CREDENTIALS"
+                    }
+                  },
+                  "LOGIN_USER_NOT_VERIFIED": {
+                    "summary": "The user is not verified.",
+                    "value": {
+                      "detail": "LOGIN_USER_NOT_VERIFIED"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "No Content"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ]
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Auth:Cookie.Logout",
+        "operationId": "auth_cookie_logout_api_auth_logout_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "401": {
+            "description": "Missing token or inactive user."
+          },
+          "204": {
+            "description": "No Content"
+          }
+        },
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ]
+      }
+    },
     "/api/books": {
       "post": {
         "summary": "Upload a book file",
         "description": "The file goes to `incoming/` under a fresh id and only there; it is gone again\nwhen it is too large, not a book, cut off, or the worker does not take it.",
         "operationId": "upload_api_books_post",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
         "parameters": [
           {
             "name": "name",
@@ -107,6 +213,11 @@
       "get": {
         "summary": "All books, the queue included",
         "operationId": "books_api_books_get",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -139,6 +250,11 @@
       "get": {
         "summary": "A book with its chapters",
         "operationId": "book_api_books__book_id__get",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
         "parameters": [
           {
             "name": "book_id",
@@ -200,6 +316,11 @@
         "summary": "Delete a book",
         "description": "A book being voiced stops; its files go, and where the listener was in it.",
         "operationId": "delete_api_books__book_id__delete",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
         "parameters": [
           {
             "name": "book_id",
@@ -255,6 +376,11 @@
       "post": {
         "summary": "Try a failed book again, from the step it failed at",
         "operationId": "retry_api_books__book_id__retry_post",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
         "parameters": [
           {
             "name": "book_id",
@@ -327,6 +453,11 @@
       "get": {
         "summary": "The cover; 404 when the book has none",
         "operationId": "cover_api_books__book_id__cover_get",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
         "parameters": [
           {
             "name": "book_id",
@@ -375,6 +506,11 @@
       "get": {
         "summary": "The audiobook to play, with Range",
         "operationId": "audio_api_books__book_id__audio_get",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
         "parameters": [
           {
             "name": "book_id",
@@ -429,6 +565,11 @@
       "get": {
         "summary": "Download the m4b, named by the title",
         "operationId": "m4b_api_books__book_id__m4b_get",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
         "parameters": [
           {
             "name": "book_id",
@@ -487,6 +628,11 @@
       "get": {
         "summary": "Download the EPUB, named by the title",
         "operationId": "epub_api_books__book_id__epub_get",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
         "parameters": [
           {
             "name": "book_id",
@@ -546,6 +692,11 @@
         "summary": "The text of the book with the times it is heard at (sync.json, version 1)",
         "description": "Given as the worker wrote it: chapters of `h`, `p`, `code` and `figure` blocks;\na figure's `src` is `figures/<name>.jpg`, under this book's `figures` route.",
         "operationId": "sync_api_books__book_id__sync_get",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
         "parameters": [
           {
             "name": "book_id",
@@ -594,6 +745,11 @@
       "get": {
         "summary": "A figure of the book's text",
         "operationId": "figure_api_books__book_id__figures__name__get",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
         "parameters": [
           {
             "name": "book_id",
@@ -668,13 +824,23 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ]
       }
     },
     "/api/books/{book_id}/position": {
       "get": {
         "summary": "Where the listener is",
         "operationId": "position_api_books__book_id__position_get",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
         "parameters": [
           {
             "name": "book_id",
@@ -735,6 +901,11 @@
       "put": {
         "summary": "Remember where the listener is",
         "operationId": "move_api_books__book_id__position_put",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
         "parameters": [
           {
             "name": "book_id",
@@ -807,6 +978,11 @@
       "put": {
         "summary": "Mark the book listened",
         "operationId": "listened_api_books__book_id__listened_put",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
         "parameters": [
           {
             "name": "book_id",
@@ -867,6 +1043,11 @@
       "delete": {
         "summary": "Mark the book not listened",
         "operationId": "unlistened_api_books__book_id__listened_delete",
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
         "parameters": [
           {
             "name": "book_id",
@@ -950,7 +1131,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ]
       }
     },
     "/api/events": {
@@ -978,12 +1164,99 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ]
+      }
+    },
+    "/api/auth": {
+      "get": {
+        "summary": "Whether the service asks for the sign-in",
+        "operationId": "login_api_auth_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Login"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ]
       }
     }
   },
   "components": {
     "schemas": {
+      "Body_auth_cookie_login_api_auth_login_post": {
+        "properties": {
+          "grant_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^password$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Grant Type"
+          },
+          "username": {
+            "type": "string",
+            "title": "Username"
+          },
+          "password": {
+            "type": "string",
+            "format": "password",
+            "title": "Password"
+          },
+          "scope": {
+            "type": "string",
+            "title": "Scope",
+            "default": ""
+          },
+          "client_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Id"
+          },
+          "client_secret": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "format": "password",
+            "title": "Client Secret"
+          }
+        },
+        "type": "object",
+        "required": [
+          "username",
+          "password"
+        ],
+        "title": "Body_auth_cookie_login_api_auth_login_post"
+      },
       "Book": {
         "properties": {
           "id": {
@@ -1320,6 +1593,29 @@
         ],
         "title": "Chapter"
       },
+      "ErrorModel": {
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              }
+            ],
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "detail"
+        ],
+        "title": "ErrorModel"
+      },
       "Format": {
         "properties": {
           "name": {
@@ -1353,6 +1649,20 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "Login": {
+        "properties": {
+          "required": {
+            "type": "boolean",
+            "title": "Required",
+            "description": "whether the service asks for the sign-in"
+          }
+        },
+        "type": "object",
+        "required": [
+          "required"
+        ],
+        "title": "Login"
       },
       "Models": {
         "properties": {
@@ -1434,7 +1744,7 @@
           "detail": {
             "type": "string",
             "title": "Detail",
-            "description": "error code: bad-request, conflict, forbidden, not-a-book, not-found, too-large, unavailable"
+            "description": "error code: bad-request, conflict, forbidden, not-a-book, not-found, too-large, too-many-attempts, unauthorized, unavailable"
           }
         },
         "type": "object",
@@ -1565,6 +1875,13 @@
           "type"
         ],
         "title": "ValidationError"
+      }
+    },
+    "securitySchemes": {
+      "APIKeyCookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "audiobux"
       }
     }
   }

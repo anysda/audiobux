@@ -6,7 +6,7 @@
 
 | Модуль | Что делает |
 |---|---|
-| `__main__.py` | командная строка: `audiobux worker`, `audiobux web`, `audiobux openapi` и `audiobux book` (одна книга без очереди) |
+| `__main__.py` | командная строка: `audiobux worker`, `audiobux web`, `audiobux password`, `audiobux openapi` и `audiobux book` (одна книга без очереди) |
 | `config.py` | настройки из переменных окружения `AUDIOBUX_*` |
 | `book.py` | рабочая папка книги: исходник, выходы шагов, отметки о готовности |
 | `pipeline.py` | шаги книги по порядку (`STEPS`) и их запуск |
@@ -15,6 +15,7 @@
 | `contract.py` | сокет worker: закрытый список методов, проверка запроса, ответы; его импортирует и web |
 | `web.py` | процесс web: API интерфейса на FastAPI, в worker ходит только через `contract` |
 | `listening.py` | своя база web: где слушатель в каждой книге и прослушана ли она |
+| `auth.py` | вход в web на fastapi-users: один пользователь, хэш пароля и сессии в `web/auth.db` |
 | `quiet.py` | тихие часы: внутри окна книга не начинается, начатая встаёт между кусками |
 | `formats/` | форматы на входе: список с сигнатурами (`__init__.py`), `Document`, по модулю на формат |
 | `formats/pages.py` | страницы текста в главы: PDF и DjVu со слоем текста, страницы после OCR |
@@ -48,7 +49,7 @@
 - список форматов (`formats/__init__.py` и то, что он тянет) и `contract` берут
   только стандартную библиотеку: их импортирует и лёгкий веб-процесс;
 - `web` дотягивается из пакета только до `contract`, `config`, списка форматов
-  и своей базы `listening`, а `worker` не знает о `web`.
+  и своих баз `listening` и `auth`, а `worker` не знает о `web`.
 
 ## Окружение
 
@@ -164,7 +165,8 @@ audiobux openapi > docs/openapi.json
 
 | Файл | Что делает |
 |---|---|
-| `src/App.svelte` | раскладка по ширине: до 1000 px телефон, от 1000 px ПК |
+| `src/App.svelte` | раскладка по ширине: до 1000 px телефон, от 1000 px ПК; на `/login` - вход |
+| `src/Login.svelte` | страница входа: логин и пароль |
 | `src/Phone.svelte`, `src/Pc.svelte` | экраны двух раскладок: библиотека, книга, плеер |
 | `src/lib/state.svelte.ts` | состояние на всё приложение: книги, отметки, выбор, один `<audio>` |
 | `src/lib/api.ts` | ручки API, которые читает интерфейс, переписаны из `docs/openapi.json` руками |
@@ -174,6 +176,8 @@ audiobux openapi > docs/openapi.json
 
 После `npm run build` страницу отдаёт сам `audiobux web`. Для правок с горячей
 перезагрузкой есть `npm run dev`: Vite проксирует `/api` к `audiobux web` на `127.0.0.1:8080`.
+Без `--tls` `audiobux web` отвечает по HTTP; пароль входа задаёт
+`echo 'пароль' | audiobux password`, без входа - `AUDIOBUX_LOGIN=off`.
 
 ```sh
 npm --prefix frontend ci

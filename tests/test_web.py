@@ -1,6 +1,12 @@
 import asyncio
 import dataclasses
+import hashlib
 import json
+import os
+import sqlite3
+import subprocess
+import sys
+import time
 import uuid
 from pathlib import Path
 from urllib.parse import quote
@@ -9,7 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 from test_worker import CountingTts, make, submit
 
-from audiobux import contract, web
+from audiobux import auth, contract, web
 from audiobux.config import Settings
 
 OPENAPI = Path(__file__).parent.parent / "docs" / "openapi.json"
@@ -21,8 +27,16 @@ SYNC = b'{"version": 1, "chapters": [{"title": "\xd0\x93", "blocks": [{"type": "
 
 
 def client_for(settings: Settings, **kw) -> TestClient:
-    """A browser on the service's own page: its Host, its Origin."""
-    return TestClient(web.create(settings), base_url=ORIGIN, headers={"origin": ORIGIN}, **kw)
+    """A browser on the service's own page: its Host, its Origin; the sign-in off (it has its own tests)."""
+    return TestClient(
+        web.create(dataclasses.replace(settings, login=False)), base_url=ORIGIN, headers={"origin": ORIGIN}, **kw
+    )
+
+
+def signed(settings: Settings) -> TestClient:
+    """The same browser with the sign-in on, over HTTPS: the session's cookie goes nowhere else."""
+    origin = f"https://{HOST}"
+    return TestClient(web.create(settings), base_url=origin, headers={"origin": origin})
 
 
 @pytest.fixture
@@ -134,7 +148,7 @@ def test_too_large_is_413_and_dropped(worker, pdf):
 
 
 def test_an_upload_cut_off_halfway_leaves_nothing(worker, pdf):
-    app = web.create(worker.settings)
+    app = web.create(dataclasses.replace(worker.settings, login=False))
     seen = set()
     parts = [{"type": "http.request", "body": pdf[: len(pdf) // 2], "more_body": True}, {"type": "http.disconnect"}]
 
@@ -575,3 +589,153 @@ def test_security_headers_on_every_answer(worker, frontend, monkeypatch):
         assert reply.headers["x-content-type-options"] == "nosniff"
         assert reply.headers["referrer-policy"] == "no-referrer"
     assert answers[-1].json() == {"detail": "internal"}, "nothing of the error goes out"
+
+
+# the sign-in
+
+
+def test_without_the_sign_in_the_api_is_401_and_a_page_leads_to_the_sign_in(worker, frontend):
+    client = signed(dataclasses.replace(worker.settings, frontend=frontend))
+    for path in ("/api/books", "/api/status", "/api/events", "/api/listening", f"/api/books/{NO_SUCH}/audio"):
+        got = client.get(path)
+        assert (got.status_code, got.json()) == (401, {"detail": "unauthorized"}), path
+    assert client.post("/api/books?name=a.pdf", content=b"%PDF-").status_code == 401
+    assert not incoming(worker)
+    for path in ("/", "/books/abc", "/index.html"):
+        got = client.get(path, follow_redirects=False)
+        assert (got.status_code, got.headers["location"]) == (303, "/login"), path
+    assert client.get("/login").text == (frontend / "index.html").read_text()
+    assert client.get("/assets/app.js").status_code == 200
+    assert client.get("/api/auth").json() == {"required": True}
+
+
+def test_the_sign_in_opens_the_service_and_the_sign_out_closes_it(worker, frontend):
+    auth.set_password(worker.settings.web / "auth.db", "верный пароль")
+    client = signed(dataclasses.replace(worker.settings, frontend=frontend))
+    got = client.post("/api/auth/login", data={"username": "admin", "password": "верный пароль"})
+    assert got.status_code == 204
+    cookie = got.headers["set-cookie"].lower()
+    assert all(part in cookie for part in ("httponly", "secure", "samesite=lax")), cookie
+    assert client.get("/api/books").json() == []
+    assert client.get("/", follow_redirects=False).status_code == 200
+    assert client.get("/login", follow_redirects=False).headers["location"] == "/"
+    assert client.post("/api/auth/logout").status_code == 204
+    assert client.get("/api/books").status_code == 401
+
+
+@pytest.mark.parametrize(("username", "password"), [("admin", "неверный"), ("root", "верный пароль"), ("admin", "")])
+def test_a_wrong_password_or_name_does_not_sign_in(worker, username, password):
+    auth.set_password(worker.settings.web / "auth.db", "верный пароль")
+    client = signed(worker.settings)
+    got = client.post("/api/auth/login", data={"username": username, "password": password})
+    assert got.status_code in (400, 422) and "set-cookie" not in got.headers
+    assert client.get("/api/books").status_code == 401
+
+
+def test_wrong_sign_ins_shut_out_their_address_for_a_while(worker, monkeypatch):
+    auth.set_password(worker.settings.web / "auth.db", "верный пароль")
+    now = [1000.0]
+    monkeypatch.setattr(auth.Attempts, "clock", staticmethod(lambda: now[0]))
+    app, origin = web.create(worker.settings), f"https://{HOST}"
+    guesser, owner = (
+        TestClient(app, base_url=origin, headers={"origin": origin}, client=(address, 50000))
+        for address in ("10.1.2.9", "10.1.2.7")
+    )
+    right = {"username": "admin", "password": "верный пароль"}
+    wrong = {"username": "admin", "password": "неверный пароль"}
+    assert [guesser.post("/api/auth/login", data=wrong).status_code for _ in range(auth.ATTEMPTS)] == [400] * 5
+    now[0] += 60
+    shut = guesser.post("/api/auth/login", data=right)
+    assert (shut.status_code, shut.json()) == (429, {"detail": "too-many-attempts"})
+    assert shut.headers["retry-after"] == str(auth.LOCKOUT - 60) and "set-cookie" not in shut.headers
+    assert owner.post("/api/auth/login", data=right).status_code == 204, "another address is not shut out"
+    now[0] += auth.LOCKOUT - 60
+    assert guesser.post("/api/auth/login", data=right).status_code == 204
+    # a right one forgets the wrong ones before it
+    for _ in range(auth.ATTEMPTS - 1):
+        guesser.post("/api/auth/login", data=wrong)
+    assert guesser.post("/api/auth/login", data=right).status_code == 204
+    assert guesser.post("/api/auth/login", data=wrong).status_code == 400
+
+
+def test_a_new_password_closes_the_sessions_and_keep_leaves_the_old_one(worker):
+    db = worker.settings.web / "auth.db"
+    assert auth.set_password(db, "первый пароль")
+    client = signed(worker.settings)
+    client.post("/api/auth/login", data={"username": "admin", "password": "первый пароль"})
+    assert not auth.set_password(db, "второй пароль", keep=True)
+    assert client.get("/api/books").status_code == 200
+    assert auth.set_password(db, "второй пароль")
+    assert client.get("/api/books").status_code == 401
+    assert client.post("/api/auth/login", data={"username": "admin", "password": "первый пароль"}).status_code == 400
+    assert client.post("/api/auth/login", data={"username": "admin", "password": "второй пароль"}).status_code == 204
+
+
+def test_a_password_shorter_than_12_is_not_set(worker):
+    db = worker.settings.web / "auth.db"
+    with pytest.raises(ValueError, match="at least 12"):
+        auth.set_password(db, "д" * 11)
+    assert not db.exists()
+    assert auth.set_password(db, "д" * 12)
+    env = {**os.environ, "AUDIOBUX_DATA": str(worker.settings.data)}
+    told = [sys.executable, "-m", "audiobux", "password"]
+    run = subprocess.run(told, input="короткий\n", env=env, capture_output=True, text=True)
+    assert (run.returncode, run.stdout, run.stderr) == (1, "", "password: at least 12 characters\n")
+
+
+def test_only_the_hash_of_the_password_is_kept(worker):
+    db = worker.settings.web / "auth.db"
+    auth.set_password(db, "Kd8x-plain-text")
+    assert db.stat().st_mode & 0o777 == 0o600
+    assert not [p for p in worker.settings.data.rglob("*") if p.is_file() and b"Kd8x-plain-text" in p.read_bytes()]
+    assert b"$argon2id$" in db.read_bytes()
+
+
+def test_of_a_session_only_the_hash_of_its_token_is_kept(worker):
+    db = worker.settings.web / "auth.db"
+    auth.set_password(db, "верный пароль")
+    client = signed(worker.settings)
+    assert client.post("/api/auth/login", data={"username": "admin", "password": "верный пароль"}).status_code == 204
+    token = client.cookies["audiobux"]
+    with sqlite3.connect(db) as kept:
+        assert kept.execute("select hash from session").fetchall() == [(hashlib.sha256(token.encode()).hexdigest(),)]
+    assert token.encode() not in db.read_bytes()
+    assert client.get("/api/books").status_code == 200
+    assert client.post("/api/auth/logout").status_code == 204
+    with sqlite3.connect(db) as kept:
+        assert kept.execute("select count(*) from session").fetchone() == (0,)
+
+
+def test_the_sessions_kept_by_the_token_itself_are_closed(worker):
+    """An auth.db of before: the token in the clear. It opens, and its sessions are gone."""
+    db = worker.settings.web / "auth.db"
+    auth.set_password(db, "верный пароль")
+    with sqlite3.connect(db) as old:
+        old.execute("drop table session")
+        old.execute("create table token (token text primary key, user_id integer not null, created_at real not null)")
+        old.execute("insert into token values ('old-token', 1, ?)", (time.time(),))
+    client = signed(worker.settings)
+    client.cookies.set("audiobux", "old-token")
+    assert client.get("/api/books").status_code == 401
+    assert client.post("/api/auth/login", data={"username": "admin", "password": "верный пароль"}).status_code == 204
+    assert client.get("/api/books").status_code == 200
+    with sqlite3.connect(db) as kept:
+        assert not kept.execute("select 1 from sqlite_master where name = 'token'").fetchall()
+
+
+@pytest.mark.parametrize("login", [False, True])
+def test_the_web_without_the_sign_in_warns_of_it(worker, caplog, login):
+    web.create(dataclasses.replace(worker.settings, login=login))
+    warned = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert [m for m in warned if "AUDIOBUX_LOGIN=off" in m and "обратным прокси" in m] == warned
+    assert len(warned) == (not login)
+
+
+def test_with_the_sign_in_off_everything_is_open(worker, frontend):
+    client = signed(dataclasses.replace(worker.settings, frontend=frontend, login=False))
+    assert client.get("/api/books").json() == []
+    assert client.get("/", follow_redirects=False).status_code == 200
+    assert client.get("/login", follow_redirects=False).headers["location"] == "/"
+    assert client.get("/api/auth").json() == {"required": False}
+    assert client.post("/api/auth/login", data={"username": "admin", "password": "x"}).status_code == 405
+    assert not (worker.settings.web / "auth.db").exists()

@@ -29,6 +29,8 @@ class Settings:
     upload_mb: int = 1024
     # host names the web process answers to besides IP addresses and localhost, comma-separated
     hosts: str = ""
+    # sign-in to the web process; off behind a reverse proxy that does its own
+    login: bool = True
     # the built interface the web process serves; nothing is served when it is not there
     frontend: Path = Path("frontend/dist")
     # the lock of what the models run on, installed into <data>/runtime on the first start
@@ -54,7 +56,7 @@ class Settings:
 
     @property
     def web(self) -> Path:
-        """The one folder the web process writes to besides incoming/: where the listener is."""
+        """The one folder the web process writes to besides incoming/: where the listener is, and the sign-in."""
         return self.data / "web"
 
     @property
@@ -90,6 +92,7 @@ class Settings:
             verify_attempts=int(get("verify_attempts", d.verify_attempts)),
             upload_mb=int(get("upload_mb", d.upload_mb)),
             hosts=get("hosts", d.hosts),
+            login=get("login", "on") != "off",
             frontend=Path(get("frontend", d.frontend)),
             runtime=get("runtime", d.runtime),
         )

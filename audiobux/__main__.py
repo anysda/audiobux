@@ -21,6 +21,9 @@ def main() -> None:
     web = sub.add_parser("web", help="the web interface and its API")
     web.add_argument("--host", default="0.0.0.0")
     web.add_argument("--port", type=int, default=8080)
+    web.add_argument("--tls", type=Path, help="serve HTTPS with cert.pem and key.pem of this folder")
+    password = sub.add_parser("password", help="set the sign-in password, read from stdin")
+    password.add_argument("--keep", action="store_true", help="leave a password set before")
     sub.add_parser("openapi", help="print the API description (docs/openapi.json)")
     one = sub.add_parser("book", help="voice a single local file, without the queue")
     one.add_argument("file", type=Path)
@@ -35,7 +38,18 @@ def main() -> None:
 
         from . import web as app
 
-        uvicorn.run(app.create(settings), host=args.host, port=args.port, proxy_headers=False)
+        tls = {"ssl_certfile": args.tls / "cert.pem", "ssl_keyfile": args.tls / "key.pem"} if args.tls else {}
+        uvicorn.run(app.create(settings), host=args.host, port=args.port, proxy_headers=False, **tls)
+    elif args.cmd == "password":
+        from . import auth
+
+        secret = sys.stdin.readline().rstrip("\n")
+        if not secret:
+            sys.exit("password: empty")
+        try:
+            print("set" if auth.set_password(settings.web / "auth.db", secret, args.keep) else "kept")
+        except ValueError as e:
+            sys.exit(f"password: {e}")
     elif args.cmd == "openapi":
         from . import web as app
 

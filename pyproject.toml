@@ -8,7 +8,7 @@ dependencies = []
 
 [project.optional-dependencies]
 # the web process: its image is these and the built interface (pylock.web.toml)
-web = ["fastapi>=0.115", "uvicorn>=0.30"]
+web = ["fastapi>=0.115", "fastapi-users>=15", "uvicorn>=0.30"]
 # what the worker imports when it starts: its image is these, ffmpeg and djvulibre (pylock.worker.toml)
 worker = ["ebooklib>=0.18", "lxml>=5", "numpy>=1.26", "pillow>=10", "pymupdf>=1.24", "rapidfuzz>=3",
           "requests>=2.31", "soundfile>=0.12", "tqdm>=4.65"]
@@ -103,15 +103,18 @@ paths = ["audiobux"]
 # into the spine), sqlite3 (row_factory), requests (a session's auth) and socketserver
 # (a handler's timeout and handle, a server's daemon_threads and request_queue_size),
 # Starlette (a file answer's max_ranges, the status_code of the answer a route fills),
-# the Hugging Face hub (its offline switch, see fetch.offline); and the fields
+# fastapi-users (the fields of a user and a session, the lookups of the sign-in, the
+# manager's secrets), the Hugging Face hub (its offline switch, see fetch.offline); and the fields
 # of the answers in contract.py and web.py, which the other side of the socket and
 # of the API reads
 ignore_names = [
     "is_linear", "row_factory", "auth", "timeout", "handle", "daemon_threads", "request_queue_size",
     "max_ranges", "status_code",
+    "is_active", "is_superuser", "is_verified", "created_at", "get_by_email", "get_by_token",
+    "reset_password_token_secret", "verification_token_secret",
     "HF_HUB_OFFLINE",
     "state", "pieces_done", "pieces_total", "percent", "added", "updated", "has_epub", "has_cover",
-    "memory_used", "memory_total", "window", "active", "detail", "position", "listened",
+    "memory_used", "memory_total", "window", "active", "detail", "position", "listened", "required",
 ]
 # the routes of the web process: FastAPI calls them
 ignore_decorators = ["@app.get", "@app.post", "@app.put", "@app.delete"]

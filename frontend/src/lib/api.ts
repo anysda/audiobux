@@ -61,6 +61,10 @@ export interface Sync {
   chapters: { title: string; t0: number; t1: number; blocks: Block[] }[];
 }
 
+export interface Auth {
+  required: boolean;
+}
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -77,6 +81,8 @@ async function call<T>(method: string, path: string, init: RequestInit = {}): Pr
   } catch {
     throw new ApiError(0, 'offline');
   }
+  // the session is over or was never there: the sign-in page, and back to the start after it
+  if (res.status === 401) location.assign('/login');
   if (!res.ok) {
     let code = '';
     try {
@@ -114,6 +120,11 @@ export const url = {
 };
 
 export const api = {
+  auth: () => call<Auth>('GET', '/api/auth'),
+  // the form fastapi-users reads: 204 and the session's cookie, or 400
+  login: (username: string, password: string) =>
+    call<void>('POST', '/api/auth/login', { body: new URLSearchParams({ username, password }) }),
+  logout: () => call<void>('POST', '/api/auth/logout'),
   books: () => call<Book[]>('GET', '/api/books'),
   book: (id: string) => call<BookDetails>('GET', `/api/books/${id}`),
   status: () => call<Status>('GET', '/api/status'),

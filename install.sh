@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Installs and starts audiobux on Debian 12 or 13 with an NVIDIA card:
 # Docker and the NVIDIA Container Toolkit if they are missing, .env, the data
-# folder, the containers. Safe to run again: what is in place is left alone.
+# folder, the certificate, the containers, the sign-in password. Safe to run
+# again: what is in place is left alone; AUDIOBUX_PASSWORD=... sets a new password.
 set -euo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -42,7 +43,7 @@ say "Карта: $(head -n1 <<<"$gpus")"
 if [ "$(id -u)" -ne 0 ]; then
 	command -v sudo >/dev/null || fail "нужны права root: запустите ./install.sh от root."
 	say "Нужны права root, запускаю через sudo"
-	exec sudo "$here/install.sh" "$@"
+	exec sudo --preserve-env=AUDIOBUX_PASSWORD "$here/install.sh" "$@"
 fi
 
 # --- Docker and the NVIDIA Container Toolkit
@@ -68,6 +69,7 @@ put() {
 
 need_tools=()
 command -v curl >/dev/null || need_tools+=(curl)
+command -v openssl >/dev/null || need_tools+=(openssl)
 [ -f /etc/ssl/certs/ca-certificates.crt ] || need_tools+=(ca-certificates)
 if [ "${#need_tools[@]}" -gt 0 ]; then
 	say "Ставлю ${need_tools[*]}"
@@ -179,6 +181,31 @@ say "Данные: $data, владелец $uid:$gid"
 port=$(setting AUDIOBUX_PORT)
 port=${port:-8080}
 
+# the addresses of the machine in the LAN, without the bridges of Docker
+if command -v ip >/dev/null; then
+	addresses=$(ip -o -4 addr show scope global | awk '$2 !~ /^(docker|br-|veth)/ { split($4, a, "/"); print a[1] }')
+else
+	addresses=$(hostname -I)
+fi
+
+# --- the certificate: self-signed, for the addresses and names of the machine, made once
+
+tls=$data/tls
+if [ ! -s "$tls/cert.pem" ] || [ ! -s "$tls/key.pem" ]; then
+	san="DNS:localhost,DNS:$(hostname),IP:127.0.0.1"
+	for a in $addresses; do san+=",IP:$a"; done
+	IFS=, read -ra names <<<"$(setting AUDIOBUX_HOSTS)"
+	for n in "${names[@]}"; do [ -z "${n// /}" ] || san+=",DNS:${n// /}"; done
+	install -d -m 0700 -o "$uid" -g "$gid" "$tls"
+	out=$(
+		umask 077
+		openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 3650 -subj "/CN=$(hostname)" \
+			-addext "subjectAltName=$san" -keyout "$tls/key.pem" -out "$tls/cert.pem" 2>&1
+	) || fail "openssl не выпустил сертификат:" "$out"
+	chown "$uid:$gid" "$tls/key.pem" "$tls/cert.pem"
+	say "Выпущен самоподписанный сертификат $tls/cert.pem для $san"
+fi
+
 # --- start and wait
 
 say "Скачиваю образы и запускаю. Рантайм моделей (около 4 ГБ) и сами модели (около 28 ГБ) воркер скачает после запуска, ход виден в интерфейсе"
@@ -195,17 +222,35 @@ until [ "$(docker inspect -f '{{.State.Health.Status}}' audiobux-worker 2>/dev/n
 	sleep 2
 done
 say "Жду веб"
-until curl -fsS -o /dev/null "http://127.0.0.1:$port/api/status"; do
+until curl -fsSk -o /dev/null "https://127.0.0.1:$port/api/auth"; do
 	[ "$SECONDS" -lt "$deadline" ] || fail "веб не ответил на порту $port за $WAIT с." "$hint"
 	sleep 2
 done
 
-# the addresses of the machine in the LAN, without the bridges of Docker
-if command -v ip >/dev/null; then
-	addresses=$(ip -o -4 addr show scope global | awk '$2 !~ /^(docker|br-|veth)/ { split($4, a, "/"); print a[1] }')
+# --- the sign-in password: only its hash goes to web/auth.db, the one made here is shown once
+
+password=
+if [ "$(setting AUDIOBUX_LOGIN)" = off ]; then
+	say "Вход выключен (AUDIOBUX_LOGIN=off)"
+elif [ -n "${AUDIOBUX_PASSWORD:-}" ]; then
+	printf '%s\n' "$AUDIOBUX_PASSWORD" | docker compose exec -T web audiobux password >/dev/null ||
+		fail "пароль не сменился." "$hint"
+	say "Пароль входа сменён, все открытые входы закрыты"
 else
-	addresses=$(hostname -I)
+	fresh=$(openssl rand -base64 18 | tr '/+' 'xy')
+	answer=$(printf '%s\n' "$fresh" | docker compose exec -T web audiobux password --keep) ||
+		fail "пароль не задан." "$hint"
+	[ "$answer" != set ] || password=$fresh
 fi
+
 say "Готово. Интерфейс:"
-for a in $addresses; do printf '    http://%s:%s\n' "$a" "$port"; done
+for a in $addresses; do printf '    https://%s:%s\n' "$a" "$port"; done
+say "Браузер предупредит о сертификате: он самоподписанный, его выпустила эта установка. Примите его один раз."
 say "Модели (около 28 ГБ) качаются в фоне, ход виден в интерфейсе; книги ждут их."
+if [ -n "$password" ]; then
+	printf '\n  ==================================================================\n'
+	printf '  Вход: логин admin, пароль  %s\n' "$password"
+	printf '  Сохраните пароль: на сервере хранится только его хэш, больше его не покажем.\n'
+	printf "  Сменить: AUDIOBUX_PASSWORD='новый пароль' ./install.sh\n"
+	printf '  ==================================================================\n\n'
+fi
