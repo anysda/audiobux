@@ -1691,13 +1691,18 @@
               }
             ],
             "title": "Total"
+          },
+          "failed": {
+            "type": "boolean",
+            "title": "Failed"
           }
         },
         "type": "object",
         "required": [
           "ready",
           "done",
-          "total"
+          "total",
+          "failed"
         ],
         "title": "Models"
       },

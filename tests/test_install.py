@@ -44,6 +44,12 @@ def test_a_setting_from_env_reaches_the_process_that_reads_it():
         assert not missing, (service, missing)
 
 
+def test_the_web_is_open_to_this_machine_only_unless_told_otherwise():
+    web = yaml.safe_load((ROOT / "compose.yaml").read_text())["services"]["web"]
+    assert web["ports"] == ["${AUDIOBUX_BIND:-127.0.0.1}:${AUDIOBUX_PORT:-8080}:8080"]
+    assert re.search(r"^AUDIOBUX_BIND=127\.0\.0\.1$", (ROOT / ".env.example").read_text(), re.M)
+
+
 def test_the_card_works_round_the_clock_unless_told_otherwise():
     assert re.search(r"^AUDIOBUX_QUIET_HOURS=$", (ROOT / ".env.example").read_text(), re.M)
 

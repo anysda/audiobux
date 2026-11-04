@@ -1,5 +1,6 @@
 import hashlib
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -106,13 +107,6 @@ def test_the_pause_stops_growing(tmp_path, folder):
 def test_models_in_place_are_not_fetched_again(tmp_path, folder):
     make(tmp_path, Hub({"a.bin": 1, "b.bin": 2})).run()
 
-    class Offline(Hub):
-        def files(self, source):
-            raise AssertionError("the network is not asked")
-
-        def download(self, file, seen):
-            raise AssertionError("nothing is downloaded")
-
     again = make(tmp_path, Offline({"a.bin": 1, "b.bin": 2}))
     assert again.ready
     again.start()
@@ -126,17 +120,63 @@ def test_models_in_place_are_not_fetched_again(tmp_path, folder):
     assert hub.calls == ["list", "b.bin"]
 
 
-def test_start_runs_in_the_background_and_says_when_ready(tmp_path, folder):
+class Offline(Hub):
+    """The worker's: the files on disk, no network."""
+
+    def files(self, source):
+        raise AssertionError("the network is not asked")
+
+    def download(self, file, seen):
+        raise AssertionError("nothing is downloaded")
+
+
+def test_the_worker_waits_for_fetch_and_passes_on_how_far_it_is(tmp_path, folder, monkeypatch):
+    monkeypatch.setattr(fetch, "BEAT", 0.01)
     gate, woken = threading.Event(), threading.Event()
-    hub = Hub({"a.bin": 1, "b.bin": 2}, gate=gate)
-    f = Fetch(settings(tmp_path), hub, on_ready=woken.set)
-    hub.fetch = f
-    f.start()
-    f.start()  # once
-    assert not f.ready
+    hub = Hub({"a.bin": 100, "b.bin": 300}, gate=gate)
+    service = make(tmp_path, hub)
+    waiting = Fetch(settings(tmp_path), Offline({}), on_ready=woken.set)
+    waiting.start()
+    waiting.start()  # once
+    assert not waiting.ready and waiting.progress() == (None, None) and not waiting.failed
+    fetching = threading.Thread(target=service.run)
+    fetching.start()
+    deadline = time.monotonic() + 10
+    while waiting.progress() != (0, 400) and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert waiting.progress() == (0, 400) and not waiting.failed
+    assert not waiting.ready
     gate.set()
+    fetching.join(10)
     assert woken.wait(10)
-    assert f.ready
+    assert waiting.ready and waiting.progress() == (None, None) and not waiting.failed
+
+
+def test_the_worker_sees_a_fetch_that_failed_or_is_gone(tmp_path, folder, monkeypatch):
+    def broken(self):
+        raise OSError("No space left on device")
+
+    monkeypatch.setattr(Fetch, "_fetch", broken)
+    service = make(tmp_path, Hub({"a.bin": 1}))
+    with pytest.raises(OSError):
+        service.run()
+    waiting = Fetch(settings(tmp_path), Offline({}), sleep=lambda s: time.sleep(0.01))
+    waiting.start()
+    assert waiting.failed
+    # fetch started again by ./install.sh tells it is there
+    service._tell()
+    assert not waiting.failed
+    # killed: its word grows old
+    waiting.clock = lambda: time.time() + fetch.STALE + 1
+    assert waiting.failed
+
+
+def test_no_word_from_fetch_for_long_is_a_failure(tmp_path, folder):
+    waiting = Fetch(settings(tmp_path), Offline({}), sleep=lambda s: time.sleep(0.01))
+    waiting.start()
+    assert not waiting.failed  # fetch is only starting
+    waiting.clock = lambda: time.time() + fetch.STALE + 1
+    assert waiting.failed
 
 
 def test_the_settings_name_the_files_the_loaders_take():
@@ -342,12 +382,14 @@ def test_a_start_with_the_models_in_place_goes_offline_at_once(tmp_path, folder)
     assert again._thread is None and hub_is_off()
 
 
-def test_a_start_with_models_missing_stays_online_until_they_come(tmp_path, folder):
-    gate = threading.Event()
-    f = make(tmp_path, Hub({"a.bin": 1, "b.bin": 2}, gate=gate))
+def test_a_start_with_models_missing_stays_online_until_they_come(tmp_path, folder, monkeypatch):
+    monkeypatch.setattr(fetch, "BEAT", 0.01)
+    f = Fetch(settings(tmp_path), Offline({}))
     f.start()
     assert not f.ready and not hub_is_off()
-    gate.set()
+    for name in ("a.bin", "b.bin"):  # what fetch puts in place, with its note
+        (folder / name).write_bytes(b"x")
+    f._note(f.pending[0], [f.pending[0].file(n) for n in ("a.bin", "b.bin")])
     f._thread.join(10)
     assert f.ready and hub_is_off()
 
@@ -386,3 +428,14 @@ def test_the_cli_voices_a_book_offline(tmp_path, monkeypatch):
     source.write_bytes(b"x")
     cli.voice_one(Settings(data=tmp_path / "data"), source, None, None)
     assert seen == [True]
+
+
+def test_the_cli_fetches_everything_and_exits(tmp_path, monkeypatch):
+    from audiobux import __main__ as cli
+
+    ran: list[Settings] = []
+    monkeypatch.setattr(fetch.Fetch, "run", lambda self: ran.append(self.settings))
+    monkeypatch.setattr("sys.argv", ["audiobux", "fetch"])
+    monkeypatch.setenv("AUDIOBUX_DATA", str(tmp_path))
+    cli.main()
+    assert [s.data for s in ran] == [tmp_path]

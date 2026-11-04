@@ -18,6 +18,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(prog="audiobux")
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("worker", help="voice the queue and answer the web process on the socket")
+    sub.add_parser("fetch", help="install the runtime and fetch the models the worker runs on, then exit")
     web = sub.add_parser("web", help="the web interface and its API")
     web.add_argument("--host", default="0.0.0.0")
     web.add_argument("--port", type=int, default=8080)
@@ -54,6 +55,11 @@ def main() -> None:
         from . import web as app
 
         print(json.dumps(app.create(settings).openapi(), ensure_ascii=False, indent=2))
+    elif args.cmd == "fetch":
+        from . import fetch
+
+        # the worker has no network of its own: all it runs on is put in place here
+        fetch.Fetch(settings).run()
     elif args.cmd == "worker":
         from . import worker
 

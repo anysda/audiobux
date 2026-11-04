@@ -7,8 +7,9 @@
 # worker on its socket in run/.
 # The data folder on the host is AUDIOBUX_DATA (./data by default); both
 # processes run as AUDIOBUX_UID:AUDIOBUX_GID, the owner of that folder. The web
-# answers on AUDIOBUX_PORT (8080), HTTPS only, with the certificate install.sh makes
-# in tls/. install.sh puts them all into .env.
+# answers on AUDIOBUX_PORT (8080) of the address AUDIOBUX_BIND (127.0.0.1: this machine
+# only), HTTPS only, with the certificate install.sh makes in tls/. install.sh puts
+# them all into .env.
 x-hardened: &hardened
   restart: unless-stopped
   user: "${AUDIOBUX_UID:-1000}:${AUDIOBUX_GID:-1000}"
@@ -21,6 +22,24 @@ x-hardened: &hardened
       max-file: "5"
 
 services:
+  # Puts in place what the worker runs on, the runtime and the models, into the data
+  # folder and exits: the only one of the image with a way out, the worker has none.
+  # It runs in the background, how far it is goes to models/.fetched/progress.json and
+  # from the worker to the interface; ./install.sh starts it again after a failure.
+  fetch:
+    <<: *hardened
+    image: ghcr.io/anysda/audiobux/worker@${AUDIOBUX_WORKER_DIGEST:?нет digest образа, запустите ./install.sh}
+    container_name: audiobux-fetch
+    restart: "no"
+    command: ["audiobux", "fetch"]
+    # what decides the models, as the worker has it
+    environment:
+      AUDIOBUX_DATA: /data
+      AUDIOBUX_TTS: f5
+    networks: [default]
+    volumes:
+      - ${AUDIOBUX_DATA:-./data}:/data
+
   worker:
     <<: *hardened
     image: ghcr.io/anysda/audiobux/worker@${AUDIOBUX_WORKER_DIGEST:?нет digest образа, запустите ./install.sh}
@@ -31,8 +50,13 @@ services:
       AUDIOBUX_TTS: f5
       AUDIOBUX_QUIET_HOURS: ${AUDIOBUX_QUIET_HOURS:-}
       AUDIOBUX_COVER_URL: http://cover:8080
-    # models are downloaded when the worker starts; covers are asked of the cover service
-    networks: [default, cover_in]
+      # the models are on disk, put there by fetch; no loader asks the hub
+      HF_HUB_OFFLINE: "1"
+    # starts at once, so that the interface is up meanwhile, and takes the first book once
+    # fetch has put the models in place; a dependency on fetch's exit would hold
+    # `docker compose up -d` for the whole download
+    # no way out: covers are asked of the cover service, the web process is on the socket
+    networks: [cover_in]
     volumes:
       - ${AUDIOBUX_DATA:-./data}:/data
       # quiet hours and the log run by the host's clock and time zone
@@ -65,7 +89,7 @@ services:
     depends_on:
       worker:
         condition: service_healthy
-    ports: ["${AUDIOBUX_PORT:-8080}:8080"]
+    ports: ["${AUDIOBUX_BIND:-127.0.0.1}:${AUDIOBUX_PORT:-8080}:8080"]
     networks: [web]
     read_only: true
     tmpfs: [/tmp]
@@ -102,6 +126,7 @@ services:
         max-file: "2"
 
 networks:
+  # fetch's way out
   default: {}
   # the web process answers on its port and goes nowhere itself
   web:

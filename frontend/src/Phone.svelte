@@ -240,10 +240,18 @@
       {#if !lib.ready}
         <div class="hero note">
           <div class="hm mono"><span>Первый запуск</span></div>
-          <Title class="h-t" text="Подготовка моделей" max={60} min={32} />
+          <Title
+            class="h-t"
+            text={lib.status?.models.failed ? 'Модели не скачались' : 'Подготовка моделей'}
+            max={60}
+            min={32}
+          />
           {#if lib.status?.models.total}
             <p class="mono">{gb(lib.status.models.done ?? 0)} из {gb(lib.status.models.total)} ГБ</p>
             <div class="bar"><i style:--p={(lib.status.models.done ?? 0) / lib.status.models.total}></i></div>
+          {/if}
+          {#if lib.status?.models.failed}
+            <p class="mono">Загрузка прервалась. Запустите ./install.sh снова, она продолжится</p>
           {/if}
         </div>
       {:else if lib.loaded && !lib.books.length}

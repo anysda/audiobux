@@ -188,6 +188,11 @@ gid=$(stat -c %g "$data")
 say "Данные: $data, владелец $uid:$gid"
 port=$(setting AUDIOBUX_PORT)
 port=${port:-8080}
+bind=$(setting AUDIOBUX_BIND)
+bind=${bind:-127.0.0.1}
+# the web as this machine reaches it: on all addresses, 127.0.0.1 is one of them
+own=$bind
+[ "$own" != 0.0.0.0 ] || own=127.0.0.1
 
 # --- the images of the release, checked by digest
 
@@ -252,9 +257,11 @@ fi
 
 # --- start and wait
 
-say "Запускаю. Рантайм моделей (около 4 ГБ) и сами модели (около 28 ГБ) воркер скачает после запуска, ход виден в интерфейсе"
+# fetch puts the runtime and the models in place in its container, whatever becomes of
+# this terminal, and the worker waits for it; a failed or stopped one goes on from here
+say "Запускаю"
 docker compose up -d ||
-	fail "контейнеры не запустились." "Журналы: docker compose logs worker web"
+	fail "контейнеры не запустились." "Журналы: docker compose logs fetch worker web"
 
 hint="Журналы: docker compose logs worker web"
 deadline=$((SECONDS + WAIT))
@@ -264,7 +271,7 @@ until [ "$(docker inspect -f '{{.State.Health.Status}}' audiobux-worker 2>/dev/n
 	sleep 2
 done
 say "Жду веб"
-until curl -fsSk -o /dev/null "https://127.0.0.1:$port/api/auth"; do
+until curl -fsSk -o /dev/null "https://$own:$port/api/auth"; do
 	[ "$SECONDS" -lt "$deadline" ] || fail "веб не ответил на порту $port за $WAIT с." "$hint"
 	sleep 2
 done
@@ -286,9 +293,16 @@ else
 fi
 
 say "Готово. Интерфейс:"
-for a in $addresses; do printf '    https://%s:%s\n' "$a" "$port"; done
+if [ "$bind" = 0.0.0.0 ]; then
+	for a in $addresses; do printf '    https://%s:%s\n' "$a" "$port"; done
+else
+	printf '    https://%s:%s\n' "$bind" "$port"
+fi
+if [ "$bind" = 127.0.0.1 ]; then
+	say "Он открыт только с этой машины. Открыть в сеть: AUDIOBUX_BIND=0.0.0.0 в .env и ./install.sh снова."
+fi
 say "Браузер предупредит о сертификате: он самоподписанный, его выпустила эта установка. Примите его один раз."
-say "Модели (около 28 ГБ) качаются в фоне, ход виден в интерфейсе; книги ждут их."
+say "Модели качаются в фоне, ход загрузки виден в интерфейсе."
 if [ -n "$password" ]; then
 	printf '\n  ==================================================================\n'
 	printf '  Вход: логин admin, пароль  %s\n' "$password"

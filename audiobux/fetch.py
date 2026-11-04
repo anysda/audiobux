@@ -7,6 +7,10 @@ hub again, a missing file is an error, not a download. A source that is all in p
 gets a note in `models/.fetched/` with its files, so a restart with the models there
 touches neither the network nor the files.
 
+The fetch service (`run`) is the only one with a way out; the worker (`start`) waits
+for it, reading what is in place from disk and how far the download is from the file
+fetch writes every `BEAT` seconds.
+
 Every model is pinned: the revision on the hub and the sha256 of each file, as the
 service was tried with them. A file with other bytes is not in place: it is fetched
 again, before and after a download alike.
@@ -25,7 +29,7 @@ import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from tqdm import tqdm
 
@@ -52,6 +56,9 @@ ALIGNER_FILES = ("*.json", "pytorch_model.bin")
 WHISPER_FILES = ("config.json", "preprocessor_config.json", "model.bin", "tokenizer.json", "vocabulary.*")
 # seconds before trying again after a failure, the last one for every failure after
 PAUSES = (10, 30, 60, 300)
+# how often fetch tells the worker how far it is; a word older than STALE is from a fetch that is gone
+BEAT = 5
+STALE = 60
 # Koziev's parser, which the runtime brings (see `runtime`)
 KOZIEV_PINNED = "\n".join(f"{d.sha256}  {d.name}" for d in KOZIEV)
 # the revision of each model's repo, then its files as `sha256sum` prints them
@@ -343,9 +350,10 @@ def _accent(size: str, workdir: Path) -> list[Source]:
 
 
 class Fetch:
-    """Installs the runtime the models run on, then fetches what `needed` lists, in a
-    thread of its own, trying again after a failure. What the models need is known only
-    with the runtime in place: RUAccent tells it."""
+    """Installs the runtime the models run on, then fetches what `needed` lists, trying
+    again after a failure. What the models need is known only with the runtime in place:
+    RUAccent tells it. In the worker, which has no network, it waits for the fetch
+    service to do that and passes on what fetch tells."""
 
     def __init__(
         self,
@@ -357,6 +365,7 @@ class Fetch:
         self.hub = hub or HuggingFace()
         self.settings, self.notes = settings, settings.models / ".fetched"
         self.on_ready, self.sleep = on_ready, sleep
+        self.told, self.clock = self.notes / "progress.json", time.time
         self.runtime = Runtime(Path(settings.runtime), settings.data / "runtime") if settings.runtime else None
         if self.runtime and self.runtime.ready:
             self.runtime.activate()
@@ -366,6 +375,8 @@ class Fetch:
         self.total: int | None = None
         self._part = 0
         self._thread: threading.Thread | None = None
+        # when the worker began to wait for fetch
+        self._waiting: float | None = None
 
     @property
     def _installed(self) -> bool:
@@ -377,10 +388,13 @@ class Fetch:
 
     def progress(self) -> tuple[int | None, int | None]:
         """(done, total) bytes while installing and fetching, else (None, None); the
-        runtime's bytes count in, ahead of the models'."""
+        runtime's bytes count in, ahead of the models'. In the worker, as fetch told them."""
         r = self.runtime
         if self.ready:
             return None, None
+        if self._waiting is not None:
+            word = self._word()
+            return (word["done"], word["total"]) if word else (None, None)
         if r and not r.ready:
             return (None, None) if r.total is None else (r.done, r.total)
         if self.total is None:
@@ -388,14 +402,75 @@ class Fetch:
         ahead = (r.total or 0) if r else 0
         return ahead + min(self.done + self._part, self.total), ahead + self.total
 
+    @property
+    def failed(self) -> bool:
+        """In the worker: fetch is gone with the models not in place, it failed or was
+        stopped; the next start of it goes on from where it was."""
+        if self.ready or self._waiting is None:
+            return False
+        word = self._word()
+        if word is None:
+            return self.clock() - self._waiting > STALE
+        return bool(word["failed"]) or self.clock() - word["at"] > STALE
+
     def start(self) -> None:
+        """The worker's side: offline at once with the models in place, else in a thread
+        of its own until fetch has put them there."""
         if self.ready:
             offline()
         elif self._thread is None:
-            self._thread = threading.Thread(target=self.run, name="fetch", daemon=True)
+            self._waiting = self.clock()
+            self._thread = threading.Thread(target=self._wait, name="fetch", daemon=True)
             self._thread.start()
 
+    def _wait(self) -> None:
+        while not self.ready:
+            self.sleep(BEAT)
+            if self.runtime and not self.runtime.ready:
+                self.runtime = Runtime(self.runtime.lock, self.runtime.root)
+                if not self.runtime.ready:
+                    continue
+                self.runtime.activate()
+            self.pending = self._again(self._pending)
+        log.info("models: all in place")
+        offline()
+        self.on_ready()
+
     def run(self) -> None:
+        """The fetch service: all in place, with how far it is told to the worker meanwhile."""
+        stop = threading.Event()
+        beat = threading.Thread(target=self._beat, args=(stop,), name="beat", daemon=True)
+        beat.start()
+        try:
+            self._fetch()
+        except BaseException:
+            stop.set()
+            beat.join()
+            self._tell(failed=True)
+            raise
+        stop.set()
+        beat.join()
+        self._tell()
+
+    def _beat(self, stop: threading.Event) -> None:
+        self._tell()
+        while not stop.wait(BEAT):
+            self._tell()
+
+    def _tell(self, failed: bool = False) -> None:
+        done, total = self.progress()
+        self.notes.mkdir(parents=True, exist_ok=True)
+        tmp = self.told.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"done": done, "total": total, "failed": failed, "at": self.clock()}))
+        tmp.replace(self.told)
+
+    def _word(self) -> dict[str, Any] | None:
+        try:
+            return cast(dict[str, Any], json.loads(self.told.read_text()))
+        except (OSError, ValueError):
+            return None
+
+    def _fetch(self) -> None:
         if self.runtime and not self.runtime.ready:
             self._again(self.runtime.install)
             self.runtime.activate()

@@ -129,6 +129,8 @@ class Models(TypedDict):
     # bytes downloaded and to download while the models are being fetched, else null
     done: int | None
     total: int | None
+    # the fetch service is gone with the models not in place; ./install.sh starts it again
+    failed: bool
 
 
 class Card(TypedDict):

@@ -38,7 +38,7 @@ export interface Listening {
 }
 
 export interface Status {
-  models: { ready: boolean; done: number | null; total: number | null };
+  models: { ready: boolean; done: number | null; total: number | null; failed: boolean };
   queue: number;
   formats: { name: string; extensions: string[] }[];
 }

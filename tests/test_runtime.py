@@ -361,8 +361,8 @@ def test_the_models_wait_for_the_runtime(tmp_path, net, monkeypatch):
     ready = threading.Event()
     f = Fetch(s, Hub(), on_ready=ready.set)
     assert not f.ready and f.pending == [] and asked == [] and f.progress() == (None, None)
-    f.start()
-    assert ready.wait(10) and f.ready and asked == [True]
+    f.run()
+    assert ready.is_set() and f.ready and asked == [True]
     total = len(ALPHA) + len(F5) + runtime.LLAMA.size
     # the runtime's bytes go ahead of the models'
     assert progress == [(total + 5, total + 10)] and f.progress() == (None, None)

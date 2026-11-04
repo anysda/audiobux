@@ -603,24 +603,28 @@ def test_the_queue_waits_for_the_models(tmp_path, chekhov_epub, monkeypatch):
     where = tmp_path / "models"
     where.mkdir()
     monkeypatch.setattr(fetch, "needed", lambda s: [fetch.Source("test/m", names=("m.bin",), local=str(where))])
+    monkeypatch.setattr(fetch, "BEAT", 0.01)
     gate = threading.Event()
     hub = Hub({"m.bin": 1000}, gate=gate)
     w = make(tmp_path, quiet=QuietHours(""), hub=hub)  # a real sleep, woken when the models are in place
-    hub.fetch = w.fetch
-    assert w.status()["models"] == {"ready": False, "done": None, "total": None}
+    # the fetch service, in a container of its own; the worker only waits for it
+    service = fetch.Fetch(w.settings, hub)
+    hub.fetch = service
+    assert w.status()["models"] == {"ready": False, "done": None, "total": None, "failed": False}
     book_id = submit(w, chekhov_epub)
     voicing = threading.Thread(target=w.run, kwargs={"until_idle": True})
     voicing.start()
+    threading.Thread(target=service.run, daemon=True).start()
     deadline = time.monotonic() + 10
-    while w.fetch.total is None and time.monotonic() < deadline:
+    while w.status()["models"]["total"] is None and time.monotonic() < deadline:
         time.sleep(0.01)
-    assert w.status()["models"] == {"ready": False, "done": 0, "total": 1000}
+    assert w.status()["models"] == {"ready": False, "done": 0, "total": 1000, "failed": False}
     assert state(w, book_id)["state"] == "queued"
     gate.set()
     voicing.join(30)
     assert not voicing.is_alive()
     assert state(w, book_id)["state"] == "done"
-    assert w.status()["models"] == {"ready": True, "done": None, "total": None}
+    assert w.status()["models"] == {"ready": True, "done": None, "total": None, "failed": False}
 
 
 def test_quiet_hours_in_the_status(tmp_path):

@@ -1,6 +1,6 @@
 """The worker: books from the queue, one at a time, and the socket the web process asks.
 
-The models are fetched first, in the background (see `fetch`): until they are in
+The models are fetched by the fetch service (see `fetch`): until they are in
 place the queue waits. They load on first use and are let go after every step and
 for the quiet hours, so an idle worker holds nothing on the card. Each book's progress lives in
 `work/<id>/` (see `pipeline`), so a restarted worker, or a failed book tried
@@ -380,7 +380,7 @@ class Worker:
         quiet = self.ctx.quiet
         done, total = self.fetch.progress()
         return contract.Status(
-            models=contract.Models(ready=self.fetch.ready, done=done, total=total),
+            models=contract.Models(ready=self.fetch.ready, done=done, total=total, failed=self.fetch.failed),
             card=card(),
             queue=self.library.queue(),
             quiet=contract.Quiet(window=quiet.spec or None, active=bool(quiet.seconds_left())),

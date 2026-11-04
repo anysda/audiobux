@@ -167,10 +167,18 @@
         <div class="phero note">
           <div class="hl">
             <span class="mono">Первый запуск</span>
-            <Title text="Подготовка моделей" max={narrow.current ? 104 : 132} min={56} lines={2} />
+            <Title
+              text={lib.status?.models.failed ? 'Модели не скачались' : 'Подготовка моделей'}
+              max={narrow.current ? 104 : 132}
+              min={56}
+              lines={2}
+            />
             {#if lib.status?.models.total}
               <p class="mono">{gb(lib.status.models.done ?? 0)} из {gb(lib.status.models.total)} ГБ</p>
               <div class="bar"><i style:--p={(lib.status.models.done ?? 0) / lib.status.models.total}></i></div>
+            {/if}
+            {#if lib.status?.models.failed}
+              <p class="mono">Загрузка прервалась. Запустите ./install.sh снова, она продолжится</p>
             {/if}
           </div>
         </div>
