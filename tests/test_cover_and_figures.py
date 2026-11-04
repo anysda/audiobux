@@ -56,7 +56,7 @@ def test_pdf_figure_becomes_a_mark_with_its_picture_and_caption(tmp_path):
     page.insert_text((72, 260), "Figure 1.1. Four boxes")
     page.insert_text((72, 300), "Text after the figure.")
     found = []
-    blocks = pdf.page_blocks(page, 0, set(), tmp_path, found)
+    blocks = pdf.page_blocks(page, 0, set(), tmp_path, found, set())
     marks = [b for b in blocks if MARK.match(b)]
     assert marks == [mark(0)]
     assert not any("Box" in b for b in blocks), "labels inside the figure go with it"

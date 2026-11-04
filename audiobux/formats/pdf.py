@@ -9,7 +9,7 @@ from typing import Any
 
 import pymupdf
 
-from ..text import CAPTION, FIGURE_SIDE, mark
+from ..text import CAPTION, FIGURE_SIDE, LISTING, mark
 from . import contents
 from .document import Document
 from .pages import from_pages, has_text_layer, top_levels
@@ -21,6 +21,9 @@ MIN_SHARE = 0.03
 MIN_SIDE = 40
 MIN_STROKES = 4
 GAP = 12
+# a font is monospaced when its letters, a few different ones at least, are all as wide;
+# a block mostly in it, of more than one line, is a listing
+MONO_LETTERS, MONO_SPREAD, MONO_SHARE = 6, 0.03, 0.8
 
 
 def read(path: Path, out: Path, depth: int) -> Document:
@@ -47,8 +50,10 @@ def read(path: Path, out: Path, depth: int) -> Document:
             book.outline = contents.headings(rows, skip)
         book.outline = [(level, cases.shown(title), n) for level, title, n in book.outline]
         logos = repeated_images(doc)
+        mono = monospaced(doc)
         pages = [
-            [] if n in skip else page_blocks(page, n, logos, out, book.figures) for n, page in enumerate(doc.pages())
+            [] if n in skip else page_blocks(page, n, logos, out, book.figures, mono)
+            for n, page in enumerate(doc.pages())
         ]
         book.chapters = from_pages(pages, top_levels(book.outline, depth))
         return book
@@ -129,10 +134,47 @@ def page_regions(page: pymupdf.Page, skip: set[str]) -> list[pymupdf.Rect]:
     )
 
 
-def page_blocks(page: pymupdf.Page, n: int, skip: set[str], out: Path, figures: list[dict[str, Any]]) -> list[str]:
+def monospaced(doc: pymupdf.Document) -> set[str]:
+    """The fonts code is set in: their letters all of one width."""
+    widths: dict[str, list[float]] = {}
+    letters: dict[str, set[str]] = {}
+    for page in doc.pages():
+        for block in page.get_text("rawdict")["blocks"]:
+            for span in (s for line in block.get("lines", []) for s in line["spans"]):
+                for c in span["chars"]:
+                    if c["c"].isalpha() and span["size"]:
+                        widths.setdefault(span["font"], []).append((c["bbox"][2] - c["bbox"][0]) / span["size"])
+                        letters.setdefault(span["font"], set()).add(c["c"])
+    return {
+        font
+        for font, w in widths.items()
+        if len(letters[font]) >= MONO_LETTERS and max(w) - min(w) <= MONO_SPREAD * max(w)
+    }
+
+
+def _listings(page: pymupdf.Page, mono: set[str]) -> set[tuple[float, ...]]:
+    """The boxes of the blocks of a page set in a monospaced font."""
+    found = set()
+    for block in page.get_text("dict")["blocks"]:
+        spans = [s for line in block.get("lines", []) for s in line["spans"]]
+        chars = sum(len(s["text"].strip()) for s in spans)
+        code = sum(len(s["text"].strip()) for s in spans if s["font"] in mono)
+        if len(block.get("lines", [])) > 1 and chars and code >= MONO_SHARE * chars:
+            found.add(_box(block["bbox"]))
+    return found
+
+
+def page_blocks(
+    page: pymupdf.Page, n: int, skip: set[str], out: Path, figures: list[dict[str, Any]], mono: set[str]
+) -> list[str]:
     """The text blocks of a page in reading order with figure marks among them;
-    the text inside a figure (its labels) goes with the figure."""
-    blocks = [(pymupdf.Rect(b[:4]), b[4]) for b in page.get_text("blocks", sort=True) if b[6] == 0]
+    the text inside a figure (its labels) goes with the figure; a listing is marked."""
+    code = _listings(page, mono) if mono else set()
+    blocks = [
+        (pymupdf.Rect(b[:4]), LISTING + b[4] if _box(b[:4]) in code else b[4])
+        for b in page.get_text("blocks", sort=True)
+        if b[6] == 0
+    ]
     regions = page_regions(page, skip)
     items: list[tuple[pymupdf.Rect, str | pymupdf.Rect]] = [
         (rect, text) for rect, text in blocks if not any(_inside(rect, region) for region in regions)
@@ -176,6 +218,10 @@ def reading_order[T](items: list[tuple[pymupdf.Rect, T]], width: float) -> list[
             stretch.append((rect, item))
     flush()
     return out
+
+
+def _box(bbox: Any) -> tuple[float, ...]:
+    return tuple(round(x, 1) for x in bbox)
 
 
 def _inside(r: pymupdf.Rect, region: pymupdf.Rect) -> bool:

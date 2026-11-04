@@ -12,6 +12,8 @@ CODE = re.compile(r"[{};=<>]|\(\s*\)|\b(public|private|class|void|var|return|new
 CAPTION = re.compile(r"^(Рис\.|Рисунок|Таблица|Табл\.|Листинг|Figure|Table)\s*\d+([.\-]\d+)*\.?(\s|$)")
 # the place of figure N of the book in its text, a paragraph of its own
 MARK = re.compile(r"^\[\[figure (\d+)\]\]$")
+# a paragraph that is a listing: shown as code, not read out
+LISTING = "[[code]] "
 # the long side of a figure picture the vision model sees, as for OCR
 FIGURE_SIDE = 1800
 

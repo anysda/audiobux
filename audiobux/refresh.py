@@ -29,7 +29,7 @@ from .pipeline import Context
 log = logging.getLogger(__name__)
 
 # the reading a book is done with; a finished book with a smaller one is read again
-VERSION = 6
+VERSION = 7
 # A heading is told from its line in a table of contents by what follows it: the first
 # paragraphs of the chapter are looked for among the blocks after it (an older reading
 # may have put a page's blocks out of order), by their first characters

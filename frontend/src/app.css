@@ -967,6 +967,11 @@ button.pill:active {
     background-color 300ms ease,
     color 300ms ease;
 }
+.rd pre.now,
+.prd pre.now {
+  background: var(--hl);
+  color: var(--hlf);
+}
 .rd figure,
 .prd figure {
   margin: 0 0 18px;

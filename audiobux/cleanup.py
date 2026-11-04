@@ -20,7 +20,7 @@ from typing import Any, TypedDict
 from rapidfuzz.distance import Levenshtein
 
 from .llm import Llm
-from .text import CAPTION, ENDINGS, looks_like_code
+from .text import CAPTION, ENDINGS, LISTING, looks_like_code
 
 log = logging.getLogger(__name__)
 
@@ -35,7 +35,6 @@ BROKEN = re.compile(r"\b(\w+)- (\w+)")
 GLUED = re.compile(r"\b[а-яё]{6,}\b")
 COMPOUND = re.compile(r"\b([а-яё]{3,})-[а-яё]{2,}")
 INDEX_ENTRY = re.compile(r"[^\W\d_] \d{1,3}(?=[,\s]|$)")
-LISTING = "[[code]] "
 MIXED = re.compile(r"\b(?=\w*[а-яёА-ЯЁ])(?=\w*[a-zA-Z])\w+\b")
 SPACED = re.compile(r"(?:\b\w ){3,}\w\b")
 LEFT_BROKEN = re.compile(r"\w- \w|\w -\w")
@@ -161,14 +160,16 @@ def _drop_layout(paragraphs: list[str]) -> list[str]:
         if in_table and not _prose(p):
             continue
         in_table = False
-        # a line without a Russian letter right after code (a closing brace) is code too
-        code = looks_like_code(p) or (in_code and not re.search(r"[а-яёА-ЯЁ]", p))
+        # marked as code by the source, or a line without a Russian letter right after code
+        # (a closing brace)
+        code = block.startswith(LISTING) or looks_like_code(p) or (in_code and not re.search(r"[а-яёА-ЯЁ]", p))
         in_code = code
         if code:
+            body = block.removeprefix(LISTING).strip()
             if kept and kept[-1].startswith(LISTING):
-                kept[-1] += "\n\n" + block.strip()
+                kept[-1] += "\n\n" + body
             else:
-                kept.append(LISTING + block.strip())
+                kept.append(LISTING + body)
             continue
         if CAPTION.match(p) or FOOTNOTE.match(p) or _index(p):
             continue

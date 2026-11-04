@@ -2,6 +2,7 @@
 pictures and tables in place with a mark in the text. The EPUB itself goes out as
 the reading copy."""
 
+import copy
 import logging
 import posixpath
 from collections.abc import Iterable, Iterator
@@ -14,7 +15,7 @@ import lxml.html
 import pymupdf
 from ebooklib import epub as ebook
 
-from ..text import code_lines, mark
+from ..text import LISTING, code_lines, mark
 from .document import Chapter, Document
 from .pages import spaces
 
@@ -56,11 +57,15 @@ def read(path: Path, out: Path, depth: int) -> Document:
                 if figure:
                     figures.append(figure)
                     chapters[-1]["paragraphs"].append(mark(len(figures) - 1))
-            elif el.tag in BLOCK_TAGS and not any(
-                c.tag in BLOCK_TAGS for c in el.iterdescendants() if isinstance(c.tag, str)
+            elif el.tag == "pre" and not any(a.tag == "pre" for a in el.iterancestors()):
+                if code := code_lines(_pre_text(el)):
+                    chapters[-1]["paragraphs"].append(LISTING + code)
+            elif (
+                el.tag in BLOCK_TAGS
+                and not any(c.tag in BLOCK_TAGS for c in el.iterdescendants() if isinstance(c.tag, str))
+                and not any(a.tag == "pre" for a in el.iterancestors())
             ):
-                text = code_lines(el.text_content()) if el.tag == "pre" else spaces(el.text_content())
-                if text:
+                if text := spaces(el.text_content()):
                     chapters[-1]["paragraphs"].append(text)
 
     return Document(
@@ -71,6 +76,17 @@ def read(path: Path, out: Path, depth: int) -> Document:
         cover=_jpeg(cover),
         keep_source=True,
     )
+
+
+def _pre_text(el: lxml.html.HtmlElement) -> str:
+    """A listing's text as printed: a line break inside it is a new line, a block in it a line of its own."""
+    el = copy.deepcopy(el)
+    if len(el) and not (el.text or "").strip():  # the space before `<code>` is only the layout of the file
+        el.text = ""
+    for inner in el.iterdescendants():
+        if isinstance(inner.tag, str) and (inner.tag == "br" or inner.tag in BLOCK_TAGS):
+            inner.tail = "\n" + (inner.tail or "")
+    return str(el.text_content())
 
 
 def _figure(

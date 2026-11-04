@@ -9,7 +9,7 @@ from itertools import pairwise
 
 from rapidfuzz import fuzz
 
-from ..text import CAPTION, ENDINGS, MARK, code_lines, looks_like_code
+from ..text import CAPTION, ENDINGS, LISTING, MARK, code_lines, looks_like_code
 from .document import Chapter
 
 PUNCT = set(string.punctuation + "«»„“”‘’—–…№•·°§©®™×€₽\xad")
@@ -63,8 +63,8 @@ def from_pages(pages: list[list[str]], toc: list[tuple[int, str, int]]) -> list[
             else:
                 paragraphs.append((n, text))
 
-    mend = Mend([t for _, t in paragraphs])
-    paragraphs = [(n, mend(t)) for n, t in paragraphs]
+    mend = Mend([t for _, t in paragraphs if not t.startswith(LISTING)])
+    paragraphs = [(n, t if t.startswith(LISTING) else mend(t)) for n, t in paragraphs]
     if not toc:
         return [{"title": "", "paragraphs": [t for _, t in paragraphs]}] if paragraphs else []
 
@@ -136,17 +136,21 @@ def strip_running(pages: list[list[str]]) -> list[list[str]]:
 
 
 def _join_lines(block: str) -> str:
-    """A block's lines into one paragraph; code keeps its lines."""
+    """A block's lines into one paragraph; code keeps its lines and is marked a listing."""
+    if block.startswith(LISTING):
+        return LISTING + code_lines(block.removeprefix(LISTING))
     # a soft hyphen at the end of a line joins the word; at the end of the block it is a
     # hyphen, the word goes on in the next block
     text = re.sub(r"\xad\s*\n\s*", "", re.sub(r"\xad\s*$", "-", block)).replace("\xad", "")
     text = re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", " ", text)
     text = re.sub(r"(\w)-\s*\n\s*(?=[a-zа-яё])", r"\1", text)
-    return code_lines(text) if looks_like_code(text) else spaces(text)
+    return LISTING + code_lines(text) if looks_like_code(text) else spaces(text)
 
 
 def _continues(prev: str, text: str) -> bool:
-    return not prev.endswith(ENDINGS) and text[0].islower()
+    return (
+        not prev.endswith(ENDINGS) and text[0].islower() and LISTING not in (prev[: len(LISTING)], text[: len(LISTING)])
+    )
 
 
 def _matches(text: str, title: str) -> bool:

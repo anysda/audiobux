@@ -21,9 +21,12 @@ from .formats.pages import from_pages, top_levels
 from .models import Models
 from .quiet import QuietHours
 from .takes import Heard
+from .text import LISTING
 
 log = logging.getLogger(__name__)
 
+# the lines the OCR reply puts around a listing
+LISTING_START, LISTING_END = "[Листинг]", "[/Листинг]"
 FIGURE_LINE = re.compile(r"^\[Рисунок:\s*(.*?)\]$", re.S)
 # pieces voiced or heard per round; quiet hours are checked between rounds
 ROUND = 32
@@ -89,9 +92,25 @@ def ocr(book: Book, ctx: Context) -> None:
 
 
 def blocks(text: str) -> list[str]:
-    """Paragraphs of an OCR reply; a `#` heading is a paragraph of its own."""
-    out, lines = [], []
+    """Paragraphs of an OCR reply; a `#` heading is a paragraph of its own, a listing
+    between `[Листинг]` and `[/Листинг]` is one marked as code, with its lines as they are."""
+    out: list[str] = []
+    lines: list[str] = []
+    code: list[str] | None = None
     for line in text.splitlines():
+        if code is not None:
+            if line.strip() == LISTING_END:
+                out += [LISTING + "\n".join(code)] if "".join(code).strip() else []
+                code = None
+            elif not line.lstrip().startswith("```"):
+                code.append(line)
+            continue
+        if line.strip() == LISTING_START:
+            if lines:
+                out.append("\n".join(lines))
+                lines = []
+            code = []
+            continue
         if line.strip() and not line.startswith("#"):
             lines.append(line)
             continue
@@ -102,6 +121,8 @@ def blocks(text: str) -> list[str]:
             out.append(line.strip())
     if lines:
         out.append("\n".join(lines))
+    if code and "".join(code).strip():  # the page ends inside a listing: it goes on on the next one
+        out.append(LISTING + "\n".join(code))
     return out
 
 
