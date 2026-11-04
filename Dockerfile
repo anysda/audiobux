@@ -8,12 +8,17 @@ FROM ghcr.io/astral-sh/uv:0.12.7 AS uv
 
 # ffmpeg with its own codecs only: the m4b wants aac, loudnorm and the mp4 muxer.
 # Debian's ffmpeg brings SDL, Mesa and LLVM along (some 200 MB) for playback.
+# The source is the release tag on FFmpeg's GitHub mirror: ffmpeg.org does not
+# answer the GitHub Actions runners. The archive is checked before it is unpacked.
 FROM python:3.12.16-slim-trixie AS ffmpeg
 ARG FFMPEG=7.1.5
+ARG FFMPEG_SHA256=e3963a50831c985933e1a625ed566ec4c7adb5c012c34fa9f84438e1d61bdacc
 RUN apt-get update \
- && apt-get install -y --no-install-recommends build-essential ca-certificates curl nasm xz-utils zlib1g-dev \
- && curl -fsSL https://ffmpeg.org/releases/ffmpeg-$FFMPEG.tar.xz | tar -xJ -C /tmp \
- && cd /tmp/ffmpeg-$FFMPEG \
+ && apt-get install -y --no-install-recommends build-essential ca-certificates curl nasm zlib1g-dev \
+ && curl -fsSL -o /tmp/ffmpeg.tar.gz https://github.com/FFmpeg/FFmpeg/archive/refs/tags/n$FFMPEG.tar.gz \
+ && echo "$FFMPEG_SHA256  /tmp/ffmpeg.tar.gz" | sha256sum -c - \
+ && tar -xzf /tmp/ffmpeg.tar.gz -C /tmp \
+ && cd /tmp/FFmpeg-n$FFMPEG \
  && ./configure --prefix=/usr/local --enable-shared --disable-static --disable-autodetect --enable-zlib \
       --disable-network --disable-doc --disable-debug --disable-ffplay \
  && make -j"$(nproc)" \
