@@ -92,7 +92,7 @@ UPLOAD = {
 def create(settings: Settings) -> FastAPI:
     app = FastAPI(
         title="audiobux",
-        version="0.1.0",
+        version="0.5.0",
         description="A book file in, an audiobook with chapters and its text out. A request for another host, "
         "or a POST, PUT or DELETE without the service's own Origin, is refused with 403.",
         # the API pages load scripts from elsewhere, which the CSP does not let in
