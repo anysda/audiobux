@@ -24,7 +24,6 @@
     | { kind: 'p'; parts: Part[] }
     | { kind: 'figure'; src: string | null; alt: string; k: number | null };
 
-  const book = $derived(lib.book(id));
   const sync = $derived(lib.syncs[id]);
 
   // every heard piece gets a number; `times` holds when each is heard, in order
@@ -354,7 +353,6 @@
     {/if}
     {#each chapters as c, n (n)}
       <section>
-        <div class="rk mono"><span>Глава {n + 1}</span><span>{book?.author}</span></div>
         <Title text={c.title} max={wide ? 64 : 46} min={wide ? 30 : 24} />
         {#each c.pieces as p, j (j)}
           {#if p.kind === 'p'}

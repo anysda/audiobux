@@ -917,13 +917,6 @@ button.pill:active {
   font-size: 1.6em;
   line-height: 0.92;
 }
-.rk {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  opacity: 0.6;
-  margin-bottom: 8px;
-}
 .rd p,
 .prd p {
   margin: 0 0 14px;
@@ -1600,9 +1593,6 @@ button.pill:active {
 .prd h2 {
   margin: 6px 0 26px;
   font-size: 64px;
-}
-.prd .rk {
-  margin-bottom: 10px;
 }
 .prd p {
   margin-bottom: 16px;
